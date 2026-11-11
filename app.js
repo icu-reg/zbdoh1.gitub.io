@@ -63,15 +63,23 @@
   // Clause 39A: remote recall is paid a minimum of 1 hour, and further calls within the hour of a paid
   // call attract no extra payment. A call exactly 60 minutes after a paid call is paid again.
   // Physical recalls are always claimable.
-  function paidIds() {
-    const paid = new Set();
+  function paidInfo(calls = state.calls) {
+    const info = new Map();
     let last = -Infinity;
-    [...state.calls].sort((a, b) => a.time.localeCompare(b.time)).forEach((c) => {
-      if (c.type === 'recall') { paid.add(c.id); return; }
+    [...calls].sort((a, b) => a.time.localeCompare(b.time)).forEach((c) => {
+      if (c.type === 'recall') { info.set(c.id, { paid: true }); return; }
       const t = Math.floor(new Date(c.time).getTime() / 60000) * 60000;
-      if (t - last >= HOUR) { paid.add(c.id); last = t; }
+      if (t - last >= HOUR) { info.set(c.id, { paid: true }); last = t; }
+      else info.set(c.id, { paid: false, by: last });
     });
-    return paid;
+    return info;
+  }
+  const paidIds = () => new Set([...paidInfo()].filter(([, v]) => v.paid).map(([k]) => k));
+  // On-call allowance is paid per on-call period; default to one per 12 hours or part thereof.
+  function allowancePeriods(s) {
+    if (s.allowancePeriods !== '' && s.allowancePeriods != null && parseInt(s.allowancePeriods, 10) >= 0) return parseInt(s.allowancePeriods, 10);
+    const end = s.end ? new Date(s.end) : new Date();
+    return Math.max(1, Math.ceil((end - new Date(s.start)) / (12 * HOUR)));
   }
   function hourlyRate() {
     const st = state.settings;
@@ -79,15 +87,30 @@
     if (custom > 0) return custom;
     return WEEKLY[st.year] ? WEEKLY[st.year] / WEEK_HOURS : 0;
   }
-  function payFor(calls) {
+  function payFor(calls, shift) {
     const paid = paidIds();
     const remote = calls.filter((c) => c.type !== 'recall');
     const paidCalls = remote.filter((c) => paid.has(c.id));
-    const hours = paidCalls.reduce((sum, c) => sum + Math.max(1, (Number(c.duration) || 0) / 60), 0);
+    const physical = calls.filter((c) => c.type === 'recall');
     const rate = hourlyRate();
     const mult = parseFloat(state.settings.multiplier) || 1.5;
-    return { paid: paidCalls.length, unpaid: remote.length - paidCalls.length,
-      physical: calls.length - remote.length, hours, rate, mult, total: hours * rate * mult };
+    // Remote: minimum 1 hour per paid call at the overtime rate.
+    const remoteHours = paidCalls.reduce((sum, c) => sum + Math.max(1, (Number(c.duration) || 0) / 60), 0);
+    // Physical: minimum 3 hours per recall; first 2 hours at 1.5x, then 2x.
+    let physHours = 0, physUnits = 0;
+    physical.forEach((c) => {
+      const h = Math.max(3, (Number(c.duration) || 0) / 60);
+      physHours += h;
+      physUnits += Math.min(h, 2) * 1.5 + Math.max(0, h - 2) * 2;
+    });
+    // Allowance: 2.5% of the weekly rate per on-call period (3.5% on a public holiday).
+    const periods = shift ? allowancePeriods(shift) : 0;
+    const allowEach = rate * WEEK_HOURS * (shift && shift.publicHoliday ? 0.035 : 0.025);
+    const cents = (n) => Math.round(n * 100) / 100;
+    const remotePay = cents(remoteHours * rate * mult), physPay = cents(physUnits * rate), allowance = cents(periods * allowEach);
+    return { paid: paidCalls.length, unpaid: remote.length - paidCalls.length, physical: physical.length,
+      remoteHours, physHours, rate, mult, periods, allowEach, remotePay, physPay, allowance,
+      total: remotePay + physPay + allowance };
   }
   const sortedShifts = () => [...state.shifts].sort((a, b) => b.start.localeCompare(a.start));
   const shiftRange = (s) => {
@@ -225,7 +248,10 @@
     if (!s || !el) return;
     const tick = () => {
       const n = shiftCalls(s.id).length;
-      el.textContent = `${fmtDur(Date.now() - new Date(s.start))} · ${n} call${n === 1 ? '' : 's'}`;
+      const lastPaid = Math.max(-Infinity, ...[...paidInfo()].filter(([, v]) => v.by).map(([, v]) => v.by),
+        ...state.calls.filter((c) => c.type !== 'recall' && paidCache.has(c.id)).map((c) => Math.floor(new Date(c.time).getTime() / 60000) * 60000));
+      const next = lastPaid + HOUR > Date.now() ? ` · next paid call from ${fmtTime(lastPaid + HOUR)}` : '';
+      el.textContent = `${fmtDur(Date.now() - new Date(s.start))} · ${n} call${n === 1 ? '' : 's'}${next}`;
     };
     tick();
     ticker = setInterval(tick, 30000);
@@ -266,29 +292,31 @@
           </div>
         </div>
       </section>
-      ${payCard(calls)}
+      ${payCard(calls, s)}
       <h2 class="section-title">Calls</h2>
       ${callList(calls, 'No calls logged for this period.')}
       <button class="btn danger" data-act="delete-shift" data-id="${esc(id)}">Delete this on-call period</button>`;
   }
 
-  function payCard(calls) {
-    if (!calls.length) return '';
-    const p = payFor(calls);
-    const counts = `${p.paid} paid call${p.paid === 1 ? '' : 's'}${p.unpaid ? ` · ${p.unpaid} not paid (within the hour of a paid call)` : ''}`;
-    const phys = p.physical ? `<p class="muted small" style="margin-top:6px">${p.physical} physical recall${p.physical === 1 ? '' : 's'} not included — claim those on the form as well.</p>` : '';
+  function payCard(calls, shift) {
+    const p = payFor(calls, shift);
+    const hrs = (h) => (h % 1 ? h.toFixed(2) : h);
+    const counts = `${p.paid} paid remote call${p.paid === 1 ? '' : 's'}${p.unpaid ? ` · ${p.unpaid} not paid (within the hour)` : ''}${p.physical ? ` · ${p.physical} physical` : ''}`;
     if (!p.rate) {
-      return `<section class="card"><p class="muted small">Estimated recall pay</p>
+      return `<section class="card"><p class="muted small">Estimated pay</p>
         <p style="font-weight:600;margin:4px 0">${counts}</p>
-        <p class="muted small">Choose your registrar year in My details to see the dollar amount.</p>${phys}</section>`;
+        <p class="muted small">Choose your registrar year in My details to see the dollar amount.</p></section>`;
     }
     const st = state.settings;
     const who = parseFloat(st.customRate) > 0 ? 'Your rate' : `Registrar Year ${st.year}${st.year === '6' ? '+' : ''}`;
+    const line = (label, detail, amount) => `<div class="payline"><span><b>${label}</b><small>${detail}</small></span><span>${money(amount)}</span></div>`;
     return `<section class="card">
-      <p class="muted small">Estimated recall pay (before tax)</p>
-      <p style="font-size:30px;font-weight:700;margin:2px 0 4px">${money(p.total)}</p>
-      <p>${counts}</p>
-      <p class="muted small" style="margin-top:6px">${who}: ${p.hours % 1 ? p.hours.toFixed(2) : p.hours} h × ${money(p.rate)}/h × ${p.mult}. On-call allowance not included. An estimate only — payroll has the final say.</p>${phys}
+      <p class="muted small">Estimated pay for this on-call (before tax)</p>
+      <p style="font-size:30px;font-weight:700;margin:2px 0 10px">${money(p.total)}</p>
+      ${line('Remote recalls', `${p.paid} paid × min 1 h = ${hrs(p.remoteHours)} h × ${p.mult}${p.unpaid ? ` · ${p.unpaid} not paid` : ''}`, p.remotePay)}
+      ${p.physical ? line('Physical recalls', `${p.physical} × min 3 h = ${hrs(p.physHours)} h · first 2 h at 1.5, then 2`, p.physPay) : ''}
+      ${line('On-call allowance', `${p.periods} period${p.periods === 1 ? '' : 's'} × ${money(p.allowEach)}${shift.publicHoliday ? ' (public holiday)' : ''}`, p.allowance)}
+      <p class="muted small" style="margin-top:10px">${who}, ${money(p.rate)}/h. Travel time is not counted. An estimate only — payroll has the final say.</p>
     </section>`;
   }
 
@@ -311,6 +339,14 @@
       ${sel('multiplier', 'Overtime rate for remote recall', [['1.5', 'Time and a half (1.5×)'], ['2', 'Double time (2×)']])}
       ${f('customRate', 'Your own hourly rate (optional, overrides year level)', 'inputmode="decimal" placeholder="e.g. 63.33"')}
       <p class="muted small" style="margin:-6px 4px 0">Rates from the AMA Victoria Doctors in Training Agreement 2022–2026, as at ${RATES_FROM}: weekly rate ÷ ${WEEK_HOURS}. Each paid remote call is a minimum of 1 hour at the overtime rate.</p>
+      <h2 class="section-title">Signature</h2>
+      <div class="card center">
+        ${st.signature ? `<img class="sigpreview" src="${esc(st.signature)}" alt="Your signature">
+        <p class="small muted" style="margin:8px 0 12px">Added to every claim form you create.</p>
+        <div class="btn-row"><button class="btn soft" data-act="draw-signature">Redo</button><button class="btn danger" data-act="remove-signature">Remove</button></div>`
+        : `<p class="small muted" style="margin-bottom:12px">Sign once with your finger and it is placed on every claim form, so only your consultant still needs to sign.</p>
+        <button class="btn soft" data-act="draw-signature">Add my signature</button>`}
+      </div>
       <h2 class="section-title">Share with a colleague</h2>
       <div class="card center">
         <div class="qr">${qrSvg(APP_URL)}</div>
@@ -352,6 +388,64 @@
   });
   $('#sheet').addEventListener('cancel', () => { sheetSubmit = null; });
 
+  // ---------- signature pad ----------
+  let sigPad = null;
+  function signatureForm() {
+    openSheet('Signature', `<p class="muted small" style="margin:0 4px 10px">Sign inside the box with your finger.</p>
+      <canvas id="sigpad" class="sigpad"></canvas>
+      <button type="button" class="btn outline" data-act="clear-pad" style="margin-top:10px">Clear</button>
+      <button type="submit" class="btn primary">Save signature</button>`, () => {
+      if (!sigPad || !sigPad.drawn) { toast('Sign in the box first'); return false; }
+      state.settings.signature = sigPad.export();
+      save(); sigPad = null; toast('Signature saved');
+    });
+    const canvas = $('#sigpad');
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w * ratio; canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0a1a3a';
+    const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    const grow = ([x, y]) => { box.x0 = Math.min(box.x0, x); box.y0 = Math.min(box.y0, y); box.x1 = Math.max(box.x1, x); box.y1 = Math.max(box.y1, y); };
+    sigPad = {
+      canvas, drawn: false,
+      clear() { ctx.clearRect(0, 0, w, h); this.drawn = false; box.x0 = box.y0 = Infinity; box.x1 = box.y1 = -Infinity; },
+      // Crop to the ink so the signature fills its box on the form.
+      export() {
+        const m = 4;
+        const x = Math.max(0, box.x0 - m), y = Math.max(0, box.y0 - m);
+        const cw = Math.min(w, box.x1 + m) - x, ch = Math.min(h, box.y1 + m) - y;
+        const out = document.createElement('canvas');
+        out.width = Math.max(1, Math.round(cw * ratio)); out.height = Math.max(1, Math.round(ch * ratio));
+        out.getContext('2d').drawImage(canvas, x * ratio, y * ratio, cw * ratio, ch * ratio, 0, 0, out.width, out.height);
+        return out.toDataURL('image/png');
+      },
+    };
+    let last = null;
+    const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); canvas.setPointerCapture(e.pointerId); last = pos(e); grow(last); });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!last) return;
+      const p = pos(e);
+      ctx.beginPath(); ctx.moveTo(...last); ctx.lineTo(...p); ctx.stroke();
+      last = p; grow(p); sigPad.drawn = true;
+    });
+    const stop = () => { last = null; };
+    canvas.addEventListener('pointerup', stop);
+    canvas.addEventListener('pointercancel', stop);
+  }
+  // Draws the saved signature into a box on the PDF, keeping its proportions.
+  function drawSignature(doc, x, y, maxW, maxH) {
+    const sig = state.settings.signature;
+    if (!sig) return;
+    try {
+      const p = doc.getImageProperties(sig);
+      const k = Math.min(maxW / p.width, maxH / p.height);
+      doc.addImage(sig, 'PNG', x, y + (maxH - p.height * k) / 2, p.width * k, p.height * k);
+    } catch { /* a damaged image should never block the form */ }
+  }
+
   // ---------- call form ----------
   function recentFroms() {
     const seen = new Set();
@@ -360,36 +454,62 @@
       .slice(0, 5);
   }
 
+  const FROM_PRESETS = ['HMO (Ward)', 'Reg (ED)', 'Patient (Switch)', 'ICU', 'External hospital'];
+  let formCallId = null;
+
   function callForm(shiftId, call) {
     const isNew = !call;
     const c = call || { time: new Date().toISOString(), type: 'phone', urn: '', patient: '', travel: '', from: '', reason: '', duration: 5, notes: '' };
     const shift = state.shifts.find((s) => s.id === shiftId);
     // Adding to a finished period: default the time to that period, not to "now".
     if (isNew && shift && shift.end) c.time = shift.start;
-    const chips = recentFroms();
+    formCallId = isNew ? '__new' : c.id;
+    const seen = new Set();
+    const froms = [...recentFroms(), ...FROM_PRESETS].filter((v) => !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())).slice(0, 7);
+    const chip = (target, value, label) => `<button type="button" class="chip" data-act="chip" data-target="${target}" data-value="${esc(value)}">${esc(label ?? value)}</button>`;
     const html = `
-      <label class="field"><span>Patient UR number</span>
-        <input class="urn" name="urn" value="${esc(c.urn)}" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. 1234567"></label>
-      <label class="field"><span>Patient initials</span>
-        <input name="patient" value="${esc(c.patient)}" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. NH"></label>
-      <div class="seg" role="radiogroup" aria-label="Type of call">
+      <div class="paybanner" id="paybanner"></div>
+      <div class="seg" role="radiogroup" aria-label="Type of recall">
         ${Object.entries(TYPE_LABELS).map(([k, v]) => `<label><input type="radio" name="type" value="${k}" ${c.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}
       </div>
-      <div class="two">
-        <label class="field"><span>Start time</span>
-          <input type="datetime-local" name="time" value="${toInput(c.time)}" required></label>
-        <label class="field"><span>Time spent (min)</span>
-          <input name="duration" value="${esc(c.duration)}" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 10"></label>
+      <div class="urn-row">
+        <label class="field"><span>Patient URN</span>
+          <input class="urn" name="urn" value="${esc(c.urn)}" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="1234567"></label>
+        <label class="field"><span>Initials</span>
+          <input class="urn" name="patient" value="${esc(c.patient)}" maxlength="5" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="NH"></label>
       </div>
-      <label class="field"><span>Called by / ward</span>
-        <input name="from" id="from-input" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="e.g. HMO (Ward), Reg (ED)"></label>
-      ${chips.length ? `<div class="chips">${chips.map((v) => `<button type="button" class="chip" data-act="chip" data-value="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
-      <label class="field"><span>Reason (optional — the form shows UR + initials)</span>
-        <input name="reason" value="${esc(c.reason)}" autocomplete="off" placeholder="e.g. external hospital name"></label>
-      <label class="field"><span>Travel time &amp; km (only if you went in)</span>
-        <input name="travel" value="${esc(c.travel)}" autocomplete="off" placeholder="e.g. 40 min, 28 km"></label>
-      <label class="field"><span>Private notes (not on the form)</span>
-        <textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
+      <div class="group">
+        <span class="group-label">Called by</span>
+        <div class="chips">${froms.map((v) => chip('from', v)).join('')}</div>
+        <input name="from" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="or type, e.g. ED Geelong" aria-label="Called by">
+      </div>
+      <div class="group">
+        <span class="group-label">Started</span>
+        <div class="chips">
+          <button type="button" class="chip" data-act="time-adj" data-min="now">Now</button>
+          <button type="button" class="chip" data-act="time-adj" data-min="-5">5m ago</button>
+          <button type="button" class="chip" data-act="time-adj" data-min="-15">15m ago</button>
+          <button type="button" class="chip" data-act="time-adj" data-min="-30">30m ago</button>
+        </div>
+        <input type="datetime-local" name="time" value="${toInput(c.time)}" required aria-label="Start time">
+      </div>
+      <div class="group">
+        <span class="group-label">Minutes spent <em id="finish-label"></em></span>
+        <div class="chips">${[5, 10, 15, 30, 60].map((m) => chip('duration', String(m), String(m))).join('')}</div>
+        <input name="duration" value="${esc(c.duration)}" inputmode="numeric" pattern="[0-9]*" placeholder="minutes" aria-label="Minutes spent">
+      </div>
+      <div class="group" id="travel-group">
+        <span class="group-label">Travel time &amp; distance</span>
+        <input name="travel" value="${esc(c.travel)}" autocomplete="off" placeholder="e.g. 40 min, 28 km" aria-label="Travel time and distance">
+      </div>
+      <details class="more" ${c.reason || c.notes ? 'open' : ''}>
+        <summary>More details</summary>
+        <label class="field"><span>Reason (added under the URN on the form)</span>
+          <input name="reason" value="${esc(c.reason)}" autocomplete="off" placeholder="e.g. which external hospital"></label>
+        <label class="field"><span>Private notes (never on the form)</span>
+          <textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
+      </details>
+      <button type="submit" class="btn primary huge">${isNew ? 'Save call' : 'Save changes'}</button>
       ${isNew ? '' : `<button type="button" class="btn danger" data-act="delete-call" data-id="${esc(c.id)}">Delete this call</button>`}`;
 
     openSheet(isNew ? 'Log a call' : 'Edit call', html, (d) => {
@@ -399,7 +519,7 @@
         time,
         urn: d.urn.trim().toUpperCase(),
         patient: d.patient.trim().toUpperCase(),
-        travel: d.travel.trim(),
+        travel: d.type === 'recall' ? d.travel.trim() : '',
         type: TYPES[d.type] ? d.type : 'phone',
         from: d.from.trim(),
         reason: d.reason.trim(),
@@ -411,7 +531,40 @@
       save();
       toast(isNew ? 'Call logged' : 'Call updated');
     });
+    refreshCallForm();
     if (isNew) setTimeout(() => $('#sheet-body .urn')?.focus(), 50);
+  }
+
+  // Keeps the call sheet's live hints in step with what has been entered.
+  function refreshCallForm() {
+    const form = $('#sheet-form');
+    const banner = $('#paybanner');
+    if (!banner) return;
+    const d = Object.fromEntries(new FormData(form).entries());
+    const start = new Date(d.time);
+    const physical = d.type === 'recall';
+    $('#travel-group').hidden = !physical;
+
+    const mins = parseInt(d.duration, 10) || 0;
+    $('#finish-label').textContent = mins && !isNaN(start) ? `· finishes ${fmtTime(start.getTime() + mins * 60000)}` : '';
+
+    form.querySelectorAll('.chip[data-target]').forEach((el) => {
+      el.classList.toggle('on', (d[el.dataset.target] || '').trim().toLowerCase() === el.dataset.value.toLowerCase());
+    });
+
+    let cls = 'paid', text = 'This call will be paid';
+    if (isNaN(start)) { cls = 'unpaid'; text = 'Enter the start time'; }
+    else if (physical) text = 'Physical recall — always claimable';
+    else {
+      const cand = { id: formCallId, time: start.toISOString(), type: 'phone' };
+      const info = paidInfo([...state.calls.filter((c) => c.id !== formCallId), cand]).get(formCallId);
+      if (!info.paid) {
+        cls = 'unpaid';
+        text = `No pay — within the hour of the ${fmtTime(info.by)} call. Next paid call from ${fmtTime(info.by + HOUR)}.`;
+      }
+    }
+    banner.className = 'paybanner ' + cls;
+    banner.textContent = text;
   }
 
   function shiftForm(shift) {
@@ -419,7 +572,10 @@
       <label class="field"><span>On-call started</span>
         <input type="datetime-local" name="start" value="${toInput(shift.start)}" required></label>
       <label class="field"><span>On-call ended ${shift.end ? '' : '(leave empty if still on call)'}</span>
-        <input type="datetime-local" name="end" value="${shift.end ? toInput(shift.end) : ''}"></label>`;
+        <input type="datetime-local" name="end" value="${shift.end ? toInput(shift.end) : ''}"></label>
+      <label class="field"><span>On-call allowance periods (blank = one per 12 hours)</span>
+        <input name="allowancePeriods" value="${esc(shift.allowancePeriods ?? '')}" inputmode="numeric" pattern="[0-9]*" placeholder="${allowancePeriods({ ...shift, allowancePeriods: '' })}"></label>
+      <label class="check"><input type="checkbox" name="publicHoliday" ${shift.publicHoliday ? 'checked' : ''}><span>Public holiday on-call (higher allowance)</span></label>`;
     openSheet('Edit times', html, (d) => {
       const start = fromInput(d.start);
       const end = d.end ? fromInput(d.end) : null;
@@ -428,7 +584,10 @@
       if (!end && state.shifts.some((s) => !s.end && s.id !== shift.id)) {
         toast('Another on-call period is already active'); return false;
       }
-      shift.start = start; shift.end = end; save();
+      shift.start = start; shift.end = end;
+      shift.allowancePeriods = d.allowancePeriods.trim();
+      shift.publicHoliday = d.publicHoliday === 'on';
+      save();
     });
   }
 
@@ -501,6 +660,7 @@
 
       doc.setFont('helvetica', 'bold').setFontSize(11);
       doc.text('Doctors Signature:', M, H - 16);
+      drawSignature(doc, M + 38, H - 25, 56, 12);
       doc.text('Authorised Manager:', M + 100, H - 16);
       doc.text('Cost Centre:', M + 195, H - 16);
       if (st.costCentre) doc.setFont('helvetica', 'normal').text(st.costCentre, M + 221, H - 16);
@@ -601,6 +761,7 @@
       y += 8;
       cell(M, y, a, 8, 'Department', { fill: true, bold: true }); cell(M + a, y, b, 8, st.department, { size: 11 });
       cell(M + a + b, y, c, 8, 'Signature', { fill: true, bold: true }); cell(M + a + b + c, y, d, 8, '');
+      drawSignature(doc, M + a + b + c + 1.5, y + 0.4, d - 3, 7.2);
       y += 8; bar(y, 6, 'SUPERVISING CONSULTANT / UNIT HEAD APPROVAL'); y += 6;
       cell(M, y, a, 9, 'Name', { fill: true, bold: true }); cell(M + a, y, b, 9, '');
       cell(M + a + b, y, c, 9, 'Signature', { fill: true, bold: true }); cell(M + a + b + c, y, d, 9, '');
@@ -690,7 +851,22 @@
       state.calls = state.calls.filter((c) => c.id !== el.dataset.id);
       save(); closeSheet(); render(); toast('Call deleted');
     },
-    chip(el) { const i = $('#from-input'); if (i) i.value = el.dataset.value; },
+    chip(el) {
+      const i = $(`#sheet-form [name="${el.dataset.target}"]`);
+      if (i) { i.value = el.dataset.value; refreshCallForm(); }
+    },
+    'time-adj'(el) {
+      const i = $('#sheet-form [name="time"]');
+      if (!i) return;
+      const base = el.dataset.min === 'now' ? Date.now() : Date.now() + Number(el.dataset.min) * 60000;
+      i.value = toInput(base); refreshCallForm();
+    },
+    'draw-signature'() { signatureForm(); },
+    'clear-pad'() { if (sigPad) sigPad.clear(); },
+    'remove-signature'() {
+      if (!confirm('Remove your saved signature?')) return;
+      delete state.settings.signature; save(); render();
+    },
     'open-shift'(el) { route = { tab: 'history', shiftId: el.dataset.id }; render(); window.scrollTo(0, 0); },
     'edit-shift'(el) { const s = state.shifts.find((x) => x.id === el.dataset.id); if (s) shiftForm(s); },
     'delete-shift'(el) {
@@ -737,6 +913,8 @@
     const el = e.target.closest('[data-act]');
     if (el && actions[el.dataset.act]) actions[el.dataset.act](el);
   });
+  $('#sheet-form').addEventListener('input', refreshCallForm);
+  $('#sheet-form').addEventListener('change', refreshCallForm);
   document.addEventListener('input', (e) => {
     const key = e.target.dataset && e.target.dataset.setting;
     if (key) { state.settings[key] = e.target.value; save(); if (key === 'form') render(); }
