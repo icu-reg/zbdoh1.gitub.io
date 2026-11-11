@@ -146,12 +146,49 @@
       : `<div class="list"><div class="empty">${emptyMsg}</div></div>`;
   }
 
+  // ---------- install & share ----------
+  const APP_URL = new URL('./', location.href).href;
+  const SHARE_ICON = '<svg class="inline-ico" viewBox="0 0 24 24" aria-label="Share"><path d="M12 3v12M8 6.5 12 3l4 3.500M6 10.500H5a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8.500a1 1 0 0 0-1-1h-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  let installPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; if (route.tab === 'home') render(); });
+  window.addEventListener('appinstalled', () => { installPrompt = null; render(); });
+
+  function installCard() {
+    const ua = navigator.userAgent;
+    const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const otherIosBrowser = ios && /CriOS|FxiOS|EdgiOS/.test(ua);
+    let body;
+    if (installPrompt) {
+      body = `<p>Install it so it opens like a normal app and works without signal.</p>
+        <button class="btn primary" data-act="install" style="margin-top:12px">Install app</button>`;
+    } else if (ios) {
+      body = `<ol class="steps">
+          <li>Tap ${SHARE_ICON} <b>Share</b> ${otherIosBrowser ? 'at the top right, next to the address' : 'at the bottom of Safari'}</li>
+          <li>Scroll down and tap <b>Add to Home Screen</b></li>
+          <li>Tap <b>Add</b>, then open it from the new icon</li>
+        </ol>
+        <p class="small">Do this first — calls you log are kept by the Home Screen app.</p>`;
+    } else {
+      body = `<p>On an iPhone, open this page in Safari, tap ${SHARE_ICON} <b>Share</b>, then <b>Add to Home Screen</b>.</p>`;
+    }
+    return `<div class="card tip"><b class="tip-title">Add On-Call Log to your Home Screen</b>${body}
+      <button class="link small" data-act="hide-install" style="padding:8px 0 0">Not now</button></div>`;
+  }
+
+  function qrSvg(text) {
+    if (!window.qrcode) return '';
+    try {
+      const q = window.qrcode(0, 'M');
+      q.addData(text); q.make();
+      return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    } catch { return ''; }
+  }
+
   function homeView() {
     const s = activeShift();
     const standalone = window.navigator.standalone === true ||
       window.matchMedia('(display-mode: standalone)').matches;
-    const tip = standalone ? '' : `<div class="card tip"><b>Put this on your Home Screen</b>
-      In Safari tap the Share button, then “Add to Home Screen”. It then opens like a normal app and works without signal.</div>`;
+    const tip = standalone || state.settings.hideInstall ? '' : installCard();
 
     if (!s) {
       const last = sortedShifts()[0];
@@ -274,6 +311,12 @@
       ${sel('multiplier', 'Overtime rate for remote recall', [['1.5', 'Time and a half (1.5×)'], ['2', 'Double time (2×)']])}
       ${f('customRate', 'Your own hourly rate (optional, overrides year level)', 'inputmode="decimal" placeholder="e.g. 63.33"')}
       <p class="muted small" style="margin:-6px 4px 0">Rates from the AMA Victoria Doctors in Training Agreement 2022–2026, as at ${RATES_FROM}: weekly rate ÷ ${WEEK_HOURS}. Each paid remote call is a minimum of 1 hour at the overtime rate.</p>
+      <h2 class="section-title">Share with a colleague</h2>
+      <div class="card center">
+        <div class="qr">${qrSvg(APP_URL)}</div>
+        <p class="small muted" style="margin:10px 0 12px">They point their iPhone camera at this code, or you send them the link. Everyone's calls stay on their own phone.</p>
+        <button class="btn soft" data-act="share-app">Send the link</button>
+      </div>
       <h2 class="section-title">Backup</h2>
       <div class="card">
         <p class="small muted" style="margin-bottom:12px">Everything is stored only on this phone — nothing is uploaded anywhere. Save a backup file now and then in case the phone is lost or replaced.</p>
@@ -661,6 +704,21 @@
     'range-pdf'() { rangeForm(); },
     back() { route.shiftId = null; render(); },
     'sheet-cancel'() { closeSheet(); },
+    'hide-install'() { state.settings.hideInstall = true; save(); render(); },
+    async install() {
+      if (!installPrompt) return;
+      installPrompt.prompt();
+      await installPrompt.userChoice.catch(() => {});
+      installPrompt = null; render();
+    },
+    async 'share-app'() {
+      const data = { title: 'On-Call Log', text: 'On-Call Log — log on-call recalls and make the claim form. Open in Safari, then Share → Add to Home Screen.', url: APP_URL };
+      if (navigator.share) {
+        try { await navigator.share(data); return; } catch (e) { if (e.name === 'AbortError') return; }
+      }
+      try { await navigator.clipboard.writeText(APP_URL); toast('Link copied'); }
+      catch { prompt('Copy this link', APP_URL); }
+    },
     backup() {
       const blob = new Blob([JSON.stringify({ app: 'oncall-log', exported: new Date().toISOString(), ...state }, null, 2)], { type: 'application/json' });
       shareFile(blob, `OnCall-Log-backup_${toDateInput(new Date())}.json`, 'application/json');

@@ -209,3 +209,12 @@ dialog#sheet::backdrop { background: rgba(0,0,0,.45); }
   max-width: calc(100vw - 32px);
 }
 #toast.show { opacity: 1; transform: translateX(-50%); }
+
+/* ---------- install & share ---------- */
+.tip .tip-title { font-size: 17px; margin-bottom: 6px; }
+.steps { margin: 4px 0 8px; padding-left: 22px; }
+.steps li { margin: 7px 0; padding-left: 2px; }
+.steps b, .tip p b { display: inline; }
+.inline-ico { width: 20px; height: 20px; vertical-align: -4px; }
+.qr { width: 190px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 6px; }
+.qr svg { display: block; width: 100%; height: auto; }

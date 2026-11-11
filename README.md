@@ -28,4 +28,4 @@ repository **Settings → Pages → Deploy from a branch**, choose the branch an
 | --- | --- |
 | `index.html`, `styles.css`, `app.js` | The app |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and Home Screen install |
-| `vendor/` | jsPDF and jsPDF-AutoTable (MIT), used to build the PDF |
+| `vendor/` | jsPDF and jsPDF-AutoTable (PDF) and qrcode-generator (share code), all MIT |

@@ -1,8 +1,8 @@
 // Offline support: try the network first (so updates arrive), fall back to the cached copy.
-const CACHE = 'oncall-log-v3';
+const CACHE = 'oncall-log-v4';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
-  'vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js',
+  'vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js', 'vendor/qrcode.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 
