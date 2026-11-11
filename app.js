@@ -3,7 +3,15 @@
   'use strict';
 
   const KEY = 'oncall-log-v1';
-  const TYPES = { phone: 'Phone only', recall: 'Returned to hospital' };
+  const TYPES = { phone: 'Remote', recall: 'Physical' };
+  const TYPE_LABELS = { phone: 'Remote (phone)', recall: 'Went in (physical)' };
+  const HOUR = 3600000;
+  // Registrar weekly rates, Victorian Doctors in Training Agreement 2022-2026 (AMA Victoria/ASMOF),
+  // as at the first full pay period on or after 1 March 2025. Update here when a new agreement lands.
+  const RATES_FROM = '1 March 2025';
+  const WEEKLY = { 1: 2481.70, 2: 2623.33, 3: 2723.30, 4: 2859.75, 5: 3253.02, 6: 3415.81 };
+  const WEEK_HOURS = 43; // registrar hourly rate for overtime = weekly rate / 43
+  const money = (n) => '$' + n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // ---------- state ----------
   let state = load();
@@ -52,6 +60,35 @@
   const activeShift = () => state.shifts.find((s) => !s.end) || null;
   const shiftCalls = (id) => state.calls.filter((c) => c.shiftId === id)
     .sort((a, b) => a.time.localeCompare(b.time));
+  // Clause 39A: remote recall is paid a minimum of 1 hour, and further calls within the hour of a paid
+  // call attract no extra payment. A call exactly 60 minutes after a paid call is paid again.
+  // Physical recalls are always claimable.
+  function paidIds() {
+    const paid = new Set();
+    let last = -Infinity;
+    [...state.calls].sort((a, b) => a.time.localeCompare(b.time)).forEach((c) => {
+      if (c.type === 'recall') { paid.add(c.id); return; }
+      const t = Math.floor(new Date(c.time).getTime() / 60000) * 60000;
+      if (t - last >= HOUR) { paid.add(c.id); last = t; }
+    });
+    return paid;
+  }
+  function hourlyRate() {
+    const st = state.settings;
+    const custom = parseFloat(st.customRate);
+    if (custom > 0) return custom;
+    return WEEKLY[st.year] ? WEEKLY[st.year] / WEEK_HOURS : 0;
+  }
+  function payFor(calls) {
+    const paid = paidIds();
+    const remote = calls.filter((c) => c.type !== 'recall');
+    const paidCalls = remote.filter((c) => paid.has(c.id));
+    const hours = paidCalls.reduce((sum, c) => sum + Math.max(1, (Number(c.duration) || 0) / 60), 0);
+    const rate = hourlyRate();
+    const mult = parseFloat(state.settings.multiplier) || 1.5;
+    return { paid: paidCalls.length, unpaid: remote.length - paidCalls.length,
+      physical: calls.length - remote.length, hours, rate, mult, total: hours * rate * mult };
+  }
   const sortedShifts = () => [...state.shifts].sort((a, b) => b.start.localeCompare(a.start));
   const shiftRange = (s) => {
     const sameDay = s.end && new Date(s.start).toDateString() === new Date(s.end).toDateString();
@@ -74,6 +111,7 @@
   function render() {
     clearInterval(ticker);
     const view = $('#view');
+    paidCache = paidIds();
     const inShift = route.tab === 'history' && route.shiftId;
     $('#back').hidden = !inShift;
     document.querySelectorAll('.tabbar button').forEach((b) => {
@@ -87,14 +125,15 @@
     else { $('#title').textContent = 'My details'; view.innerHTML = settingsView(); }
   }
 
+  let paidCache = new Set();
   function callRow(c) {
     const meta = [c.from, c.reason].filter(Boolean).join(' · ') || 'No details';
     const dur = c.duration ? ` · ${c.duration} min` : '';
     return `<button class="row" data-act="edit-call" data-id="${esc(c.id)}">
       <span class="time">${fmtTime(c.time)}</span>
       <span class="body">
-        <span class="line1">${esc([c.patient, c.urn ? 'UR ' + c.urn : ''].filter(Boolean).join(' · ') || 'No patient details')}${
-          c.type === 'recall' ? '<span class="badge recall">In person</span>' : ''}</span>
+        <span class="line1">${esc([c.urn ? 'URN ' + c.urn : '', c.patient].filter(Boolean).join(' · ') || 'No patient details')}${
+          c.type === 'recall' ? '<span class="badge recall">Went in</span>' : (paidCache.has(c.id) ? '<span class="badge">Paid</span>' : '<span class="badge none">No pay</span>')}</span>
         <span class="line2">${esc(meta)}${dur}</span>
       </span>
       <span class="chev" aria-hidden="true">›</span>
@@ -190,22 +229,51 @@
           </div>
         </div>
       </section>
+      ${payCard(calls)}
       <h2 class="section-title">Calls</h2>
       ${callList(calls, 'No calls logged for this period.')}
       <button class="btn danger" data-act="delete-shift" data-id="${esc(id)}">Delete this on-call period</button>`;
+  }
+
+  function payCard(calls) {
+    if (!calls.length) return '';
+    const p = payFor(calls);
+    const counts = `${p.paid} paid call${p.paid === 1 ? '' : 's'}${p.unpaid ? ` · ${p.unpaid} not paid (within the hour of a paid call)` : ''}`;
+    const phys = p.physical ? `<p class="muted small" style="margin-top:6px">${p.physical} physical recall${p.physical === 1 ? '' : 's'} not included — claim those on the form as well.</p>` : '';
+    if (!p.rate) {
+      return `<section class="card"><p class="muted small">Estimated recall pay</p>
+        <p style="font-weight:600;margin:4px 0">${counts}</p>
+        <p class="muted small">Choose your registrar year in My details to see the dollar amount.</p>${phys}</section>`;
+    }
+    const st = state.settings;
+    const who = parseFloat(st.customRate) > 0 ? 'Your rate' : `Registrar Year ${st.year}${st.year === '6' ? '+' : ''}`;
+    return `<section class="card">
+      <p class="muted small">Estimated recall pay (before tax)</p>
+      <p style="font-size:30px;font-weight:700;margin:2px 0 4px">${money(p.total)}</p>
+      <p>${counts}</p>
+      <p class="muted small" style="margin-top:6px">${who}: ${p.hours % 1 ? p.hours.toFixed(2) : p.hours} h × ${money(p.rate)}/h × ${p.mult}. On-call allowance not included. An estimate only — payroll has the final say.</p>${phys}
+    </section>`;
   }
 
   function settingsView() {
     const st = state.settings;
     const f = (key, label, extra = '') => `<label class="field"><span>${label}</span>
       <input data-setting="${key}" value="${esc(st[key])}" autocomplete="off" ${extra}></label>`;
-    return `<p class="muted small" style="margin:0 4px 14px">Your name, employee number and cost centre are printed on the recall form.</p>
+    const sel = (key, label, opts) => `<label class="field"><span>${label}</span>
+      <select data-setting="${key}">${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(st[key] ?? opts[0][0]) === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+    return `<p class="muted small" style="margin:0 4px 14px">These details are printed on the recall claim form.</p>
       ${f('name', 'Full name', 'autocapitalize="words"')}
       ${f('position', 'Position', 'placeholder="e.g. Registrar" autocapitalize="words"')}
       ${f('employeeId', 'Employee / payroll number')}
       ${f('department', 'Department / unit', 'autocapitalize="words"')}
-      ${f('hospital', 'Hospital', 'autocapitalize="words"')}
-      ${f('costCentre', 'Cost centre (if you know it)')}
+      ${sel('form', 'Claim form', [['alfred', 'Alfred Health — Recall Claim Form'], ['monash', 'Monash Health — Recall Form (without return)']])}
+      ${st.form === 'monash' ? f('costCentre', 'Cost centre (if you know it)') : sel('cylinders', 'Car (for travel claims)', [['', 'Not set'], ['4', '4 cylinder'], ['6', '6 cylinder']])}
+      ${sel('include', 'Remote calls to put on the form', [['paid', 'Paid calls only (one per hour)'], ['all', 'All calls']])}
+      <h2 class="section-title">Pay</h2>
+      ${sel('year', 'Registrar year level', [['', 'Choose…'], ...[1, 2, 3, 4, 5, 6].map((y) => [String(y), `Registrar Year ${y}${y === 6 ? ' and above' : ''} — ${money(WEEKLY[y] / WEEK_HOURS)}/h`])])}
+      ${sel('multiplier', 'Overtime rate for remote recall', [['1.5', 'Time and a half (1.5×)'], ['2', 'Double time (2×)']])}
+      ${f('customRate', 'Your own hourly rate (optional, overrides year level)', 'inputmode="decimal" placeholder="e.g. 63.33"')}
+      <p class="muted small" style="margin:-6px 4px 0">Rates from the AMA Victoria Doctors in Training Agreement 2022–2026, as at ${RATES_FROM}: weekly rate ÷ ${WEEK_HOURS}. Each paid remote call is a minimum of 1 hour at the overtime rate.</p>
       <h2 class="section-title">Backup</h2>
       <div class="card">
         <p class="small muted" style="margin-bottom:12px">Everything is stored only on this phone — nothing is uploaded anywhere. Save a backup file now and then in case the phone is lost or replaced.</p>
@@ -251,7 +319,7 @@
 
   function callForm(shiftId, call) {
     const isNew = !call;
-    const c = call || { time: new Date().toISOString(), type: 'phone', urn: '', patient: '', from: '', reason: '', duration: '', notes: '' };
+    const c = call || { time: new Date().toISOString(), type: 'phone', urn: '', patient: '', travel: '', from: '', reason: '', duration: 5, notes: '' };
     const shift = state.shifts.find((s) => s.id === shiftId);
     // Adding to a finished period: default the time to that period, not to "now".
     if (isNew && shift && shift.end) c.time = shift.start;
@@ -259,24 +327,26 @@
     const html = `
       <label class="field"><span>Patient UR number</span>
         <input class="urn" name="urn" value="${esc(c.urn)}" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. 1234567"></label>
-      <label class="field"><span>Patient name</span>
-        <input name="patient" value="${esc(c.patient)}" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" placeholder="e.g. Jane Citizen"></label>
+      <label class="field"><span>Patient initials</span>
+        <input name="patient" value="${esc(c.patient)}" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. NH"></label>
       <div class="seg" role="radiogroup" aria-label="Type of call">
-        ${Object.entries(TYPES).map(([k, v]) => `<label><input type="radio" name="type" value="${k}" ${c.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}
+        ${Object.entries(TYPE_LABELS).map(([k, v]) => `<label><input type="radio" name="type" value="${k}" ${c.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}
       </div>
       <div class="two">
-        <label class="field"><span>Time of call</span>
+        <label class="field"><span>Start time</span>
           <input type="datetime-local" name="time" value="${toInput(c.time)}" required></label>
         <label class="field"><span>Time spent (min)</span>
           <input name="duration" value="${esc(c.duration)}" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 10"></label>
       </div>
       <label class="field"><span>Called by / ward</span>
-        <input name="from" id="from-input" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="e.g. ED, Ward 4B, RN Smith"></label>
+        <input name="from" id="from-input" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="e.g. HMO (Ward), Reg (ED)"></label>
       ${chips.length ? `<div class="chips">${chips.map((v) => `<button type="button" class="chip" data-act="chip" data-value="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
-      <label class="field"><span>Reason for call</span>
-        <input name="reason" value="${esc(c.reason)}" autocomplete="off" placeholder="e.g. Hypotension, review requested"></label>
-      <label class="field"><span>Advice / action (optional)</span>
-        <textarea name="notes" rows="3">${esc(c.notes)}</textarea></label>
+      <label class="field"><span>Reason (optional — the form shows UR + initials)</span>
+        <input name="reason" value="${esc(c.reason)}" autocomplete="off" placeholder="e.g. external hospital name"></label>
+      <label class="field"><span>Travel time &amp; km (only if you went in)</span>
+        <input name="travel" value="${esc(c.travel)}" autocomplete="off" placeholder="e.g. 40 min, 28 km"></label>
+      <label class="field"><span>Private notes (not on the form)</span>
+        <textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
       ${isNew ? '' : `<button type="button" class="btn danger" data-act="delete-call" data-id="${esc(c.id)}">Delete this call</button>`}`;
 
     openSheet(isNew ? 'Log a call' : 'Edit call', html, (d) => {
@@ -285,7 +355,8 @@
       const fields = {
         time,
         urn: d.urn.trim().toUpperCase(),
-        patient: d.patient.trim(),
+        patient: d.patient.trim().toUpperCase(),
+        travel: d.travel.trim(),
         type: TYPES[d.type] ? d.type : 'phone',
         from: d.from.trim(),
         reason: d.reason.trim(),
@@ -358,7 +429,7 @@
     });
   }
 
-  function makePdf(shifts) {
+  function makeMonashPdf(shifts) {
     if (!window.jspdf) { toast('PDF tools did not load — reopen the app with signal once'); return; }
     shifts = [...shifts].sort((a, b) => a.start.localeCompare(b.start));
     const rows = claimRows(shifts);
@@ -411,6 +482,115 @@
     const who = (st.name || '').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const name = `Recall-Form${who ? '_' + who : ''}_${toDateInput(first.start)}${shifts.length > 1 ? '_to_' + toDateInput(last.start) : ''}.pdf`;
     shareFile(doc.output('blob'), name, 'application/pdf');
+  }
+
+  // ---------- PDF: Alfred Health Recall Claim Form ----------
+  const ALFRED_ROWS = 11;
+  function makeAlfredPdf(shifts) {
+    if (!window.jspdf) { toast('PDF tools did not load — reopen the app with signal once'); return; }
+    shifts = [...shifts].sort((a, b) => a.start.localeCompare(b.start));
+    const st = state.settings;
+    const ids = new Set(shifts.map((s) => s.id));
+    const paid = paidIds();
+    const calls = state.calls
+      .filter((c) => ids.has(c.shiftId) && (c.type === 'recall' || st.include === 'all' || paid.has(c.id)))
+      .sort((a, b) => a.time.localeCompare(b.time));
+    if (!calls.length) { toast('No calls to put on the form'); return; }
+
+    const rows = calls.map((c) => {
+      const d = new Date(c.time);
+      const mins = Number(c.duration) || 0;
+      const who = [c.urn ? 'URN ' + c.urn : '', c.patient].filter(Boolean).join(' - ');
+      return [`${d.getDate()}/${d.getMonth() + 1}`, TYPES[c.type] || TYPES.phone, c.from || '',
+        [who, c.reason].filter(Boolean).join('\n'), fmtTime(d), mins ? fmtTime(d.getTime() + mins * 60000) : '',
+        c.type === 'recall' ? (c.travel || '') : ''];
+    });
+    while (rows.length % ALFRED_ROWS) rows.push(['', '', '', '', '', '', '']);
+
+    const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 14, IW = W - 2 * M;
+    const maroon = [134, 22, 54], grey = [217, 217, 217];
+    const TOP = 80, FOOT = H - 58;
+
+    const bar = (y, h, label) => {
+      doc.setFillColor(...maroon).rect(M, y, IW, h, 'F');
+      doc.setFont('helvetica', 'bold').setFontSize(8).setTextColor(255).text(label, M + 2, y + h / 2 + 1.1);
+      doc.setTextColor(0);
+    };
+    const cell = (x, y, w, h, text, opts = {}) => {
+      if (opts.fill) doc.setFillColor(...grey);
+      doc.setDrawColor(0).setLineWidth(0.2).rect(x, y, w, h, opts.fill ? 'FD' : 'S');
+      if (text) doc.setFont('helvetica', opts.bold ? 'bold' : 'normal').setFontSize(opts.size || 8).text(String(text), x + 2, y + h / 2 + 1.2);
+    };
+
+    const pageFrame = () => {
+      doc.setFont('helvetica', 'bold').setFontSize(15).setTextColor(200, 30, 45).text('Alfred Health', M - 4, 13);
+      doc.setTextColor(0).setFontSize(13).text('Recall Claim Form', W / 2, 21, { align: 'center' });
+      bar(27, 6, 'INSTRUCTIONS');
+      doc.setDrawColor(0).setLineWidth(0.2).rect(M, 33, IW, 41);
+      doc.setFont('helvetica', 'normal').setFontSize(7.6);
+      [
+        [2, 'Please use this form if you are on-call and recalled to duty, to complete either:'],
+        [8, '•     Remote work by electronic means from off-site  i.e. telephone and/or computer'],
+        [8, '•     Physical return to the health service'],
+        [2, 'Please ensure the following:'],
+        [6, '1.    Select whether you remotely worked electronically or whether you physically went into the health service'],
+        [6, '2.    Record the reason for recall, the start and end time of the recall, and enter travel details if applicable'],
+        [6, '3.    Ask your Head of Unit or supervising consultant to approve. Contact Medical Workforce Unit if you need support'],
+        [6, '4.    Email the approved form to medicalrosters@alfred.org.au or hand deliver it to the Medical Workforce Unit by 0900'],
+        [11.5, 'Monday of the pay period end'],
+      ].forEach(([indent, line], i) => doc.text(line, M + indent, 37.5 + i * 4.25));
+      bar(74, 6, 'RECALL INFORMATION');
+
+      // footer
+      let y = FOOT;
+      doc.rect(M, y, IW, 7);
+      doc.setFont('helvetica', 'bold').setFontSize(7.5).text('For travel, *tick* number of cylinders in vehicle:', M + 2, y + 4.4);
+      [['4cyl', 68, '4'], ['6cyl', 84, '6']].forEach(([label, x, v]) => {
+        doc.text(label, M + x, y + 4.4);
+        doc.rect(M + x + 7, y + 1, 5, 5);
+        if (st.cylinders === v) { doc.setLineWidth(0.5).line(M + x + 8, y + 3.6, M + x + 9.4, y + 5).line(M + x + 9.4, y + 5, M + x + 11.2, y + 1.8); doc.setLineWidth(0.2); }
+      });
+      y += 7; bar(y, 6, 'EMPLOYEE DECLARATION'); y += 6;
+      const a = 24, b = 76, c = 26, d = IW - a - b - c;
+      cell(M, y, a, 8, 'Name', { fill: true, bold: true }); cell(M + a, y, b, 8, st.name, { size: 11 });
+      cell(M + a + b, y, c, 8, 'Employee #', { fill: true, bold: true }); cell(M + a + b + c, y, d, 8, st.employeeId, { size: 11 });
+      y += 8;
+      cell(M, y, a, 8, 'Department', { fill: true, bold: true }); cell(M + a, y, b, 8, st.department, { size: 11 });
+      cell(M + a + b, y, c, 8, 'Signature', { fill: true, bold: true }); cell(M + a + b + c, y, d, 8, '');
+      y += 8; bar(y, 6, 'SUPERVISING CONSULTANT / UNIT HEAD APPROVAL'); y += 6;
+      cell(M, y, a, 9, 'Name', { fill: true, bold: true }); cell(M + a, y, b, 9, '');
+      cell(M + a + b, y, c, 9, 'Signature', { fill: true, bold: true }); cell(M + a + b + c, y, d, 9, '');
+    };
+
+    doc.autoTable({
+      startY: TOP,
+      margin: { top: TOP, left: M, right: M, bottom: H - FOOT },
+      head: [['Date', 'Recall Type (e.g. physical, remote)', 'Called by (e.g. ED, wards, external hospital)',
+        'Reason for Recall\n(if called by an external hospital, please specify which hospital)',
+        'Recall Start time\n(not including travel)', 'Recall Finish time\n(not including travel)',
+        'Travel Time & Distance travelled (kms)\n(physical recall only)']],
+      body: rows,
+      theme: 'grid',
+      rowPageBreak: 'avoid',
+      styles: { font: 'helvetica', fontSize: 9.5, cellPadding: 1.2, minCellHeight: 12.4, valign: 'middle', textColor: 0, lineColor: 0, lineWidth: 0.2, overflow: 'linebreak' },
+      headStyles: { fillColor: 255, textColor: 0, fontStyle: 'bold', halign: 'center', fontSize: 7.5, minCellHeight: 18 },
+      columnStyles: {
+        0: { cellWidth: 17, halign: 'center', fontSize: 12 }, 1: { cellWidth: 20, halign: 'center' }, 2: { cellWidth: 31 },
+        3: { cellWidth: 'auto', halign: 'center' }, 4: { cellWidth: 20, halign: 'center', fontSize: 12 },
+        5: { cellWidth: 20, halign: 'center', fontSize: 12 }, 6: { cellWidth: 28, halign: 'center' },
+      },
+      didDrawPage: pageFrame,
+    });
+
+    const first = shifts[0], last = shifts[shifts.length - 1];
+    const who = (st.name || '').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const name = `Recall-Claim${who ? '_' + who : ''}_${toDateInput(first.start)}${shifts.length > 1 ? '_to_' + toDateInput(last.start) : ''}.pdf`;
+    shareFile(doc.output('blob'), name, 'application/pdf');
+  }
+
+  function makePdf(shifts) {
+    return state.settings.form === 'monash' ? makeMonashPdf(shifts) : makeAlfredPdf(shifts);
   }
 
   async function shareFile(blob, name, type) {
@@ -501,7 +681,7 @@
   });
   document.addEventListener('input', (e) => {
     const key = e.target.dataset && e.target.dataset.setting;
-    if (key) { state.settings[key] = e.target.value; save(); }
+    if (key) { state.settings[key] = e.target.value; save(); if (key === 'form') render(); }
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'restore-file' && e.target.files[0]) restore(e.target.files[0]);

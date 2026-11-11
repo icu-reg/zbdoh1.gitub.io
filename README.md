@@ -3,8 +3,10 @@
 A small iPhone-friendly web app for logging calls while on call and producing a PDF to send in to work.
 
 - **Start on-call / End on-call** marks each on-call period.
-- **Log a call** records the patient UR number and name, time, phone-only vs returned to hospital, who called, the reason, and minutes spent.
-- **Create recall form (PDF)** fills in the Monash Health *Recall Form (without return to Hospital)* for an on-call period (or a date range, from the History tab) and opens the iPhone share sheet so it can be emailed. Phone-only calls within an hour of each other are grouped into one row; calls marked *Returned to hospital* are left off.
+- **Log a call** records the patient URN and initials, start time, minutes spent, remote vs physical recall, and who called.
+- **Create recall form (PDF)** fills in the Alfred Health *Recall Claim Form* (or the Monash Health *Recall Form (without return to Hospital)* — choose in My details) for an on-call period or a date range, and opens the iPhone share sheet so it can be emailed.
+- **One paid call per hour:** a remote call is paid only if it starts at least 60 minutes after the previous paid call (19:15 paid, 20:14 not paid, 20:15 paid). By default only paid calls go on the form; My details has an option to include all calls.
+- **Pay estimate:** pick a registrar year level and each on-call period shows estimated recall pay — paid calls x minimum 1 hour x hourly rate (weekly rate / 43) x overtime multiplier. Rates are in `app.js` (`WEEKLY`), from the AMA Victoria Doctors in Training Agreement 2022-2026 as at 1 March 2025.
 - Works offline once installed. All data stays on the phone; nothing is uploaded.
 
 ## Installing on an iPhone

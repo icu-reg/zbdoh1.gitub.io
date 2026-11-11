@@ -150,6 +150,7 @@ main {
   border-radius: 999px; background: var(--accent-soft); color: var(--accent);
   vertical-align: 1px; margin-left: 6px;
 }
+.badge.none { background: var(--line); color: var(--muted); }
 .badge.recall { background: var(--warn-soft); color: var(--warn-text); }
 .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
 
