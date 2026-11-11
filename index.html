@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>On-Call Log</title>
+<meta name="description" content="Log on-call phone calls and recalls, then export a PDF.">
+<meta name="theme-color" content="#0b6e69" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1716" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="On-Call">
+<meta name="format-detection" content="telephone=no">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="back" id="back" data-act="back" hidden aria-label="Back">‹ Back</button>
+  <h1 id="title">On-Call Log</h1>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<nav class="tabbar" aria-label="Sections">
+  <button data-tab="home" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02z"/></svg>
+    <span>On call</span>
+  </button>
+  <button data-tab="history">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 1.5V8h4.5zM8 12v1.6h8V12zm0 3.6v1.6h8v-1.6z"/></svg>
+    <span>History</span>
+  </button>
+  <button data-tab="settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.8-3.6-5-8-5z"/></svg>
+    <span>My details</span>
+  </button>
+</nav>
+
+<dialog id="sheet" aria-labelledby="sheet-title">
+  <form id="sheet-form" method="dialog" novalidate>
+    <div class="sheet-head">
+      <button type="button" class="link" data-act="sheet-cancel">Cancel</button>
+      <h2 id="sheet-title"></h2>
+      <button type="submit" class="link strong" id="sheet-save">Save</button>
+    </div>
+    <div class="sheet-body" id="sheet-body"></div>
+  </form>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/jspdf.plugin.autotable.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
