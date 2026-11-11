@@ -135,6 +135,15 @@
     clearInterval(ticker);
     const view = $('#view');
     paidCache = paidIds();
+    const welcoming = !state.settings.onboarded;
+    document.body.classList.toggle('welcoming', welcoming);
+    if (welcoming) {
+      $('#back').hidden = true;
+      $('#title').textContent = 'Set up';
+      view.innerHTML = welcomeView();
+      if (welcomeStep === 2) mountPad($('#sigpad'));
+      return;
+    }
     const inShift = route.tab === 'history' && route.shiftId;
     $('#back').hidden = !inShift;
     document.querySelectorAll('.tabbar button').forEach((b) => {
@@ -329,7 +338,7 @@
     return `<p class="muted small" style="margin:0 4px 14px">These details are printed on the recall claim form.</p>
       ${f('name', 'Full name', 'autocapitalize="words"')}
       ${f('position', 'Position', 'placeholder="e.g. Registrar" autocapitalize="words"')}
-      ${f('employeeId', 'Employee / payroll number')}
+      ${f('employeeId', 'Employee number (optional)')}
       ${f('department', 'Department / unit', 'autocapitalize="words"')}
       ${sel('form', 'Claim form', [['alfred', 'Alfred Health — Recall Claim Form'], ['monash', 'Monash Health — Recall Form (without return)']])}
       ${st.form === 'monash' ? f('costCentre', 'Cost centre (if you know it)') : sel('cylinders', 'Car (for travel claims)', [['', 'Not set'], ['4', '4 cylinder'], ['6', '6 cylinder']])}
@@ -390,16 +399,7 @@
 
   // ---------- signature pad ----------
   let sigPad = null;
-  function signatureForm() {
-    openSheet('Signature', `<p class="muted small" style="margin:0 4px 10px">Sign inside the box with your finger.</p>
-      <canvas id="sigpad" class="sigpad"></canvas>
-      <button type="button" class="btn outline" data-act="clear-pad" style="margin-top:10px">Clear</button>
-      <button type="submit" class="btn primary">Save signature</button>`, () => {
-      if (!sigPad || !sigPad.drawn) { toast('Sign in the box first'); return false; }
-      state.settings.signature = sigPad.export();
-      save(); sigPad = null; toast('Signature saved');
-    });
-    const canvas = $('#sigpad');
+  function mountPad(canvas) {
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     const w = canvas.clientWidth, h = canvas.clientHeight;
     canvas.width = w * ratio; canvas.height = h * ratio;
@@ -435,6 +435,75 @@
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
   }
+  function signatureForm() {
+    openSheet('Signature', `<p class="muted small" style="margin:0 4px 10px">Sign inside the box with your finger.</p>
+      <canvas id="sigpad" class="sigpad"></canvas>
+      <button type="button" class="btn outline" data-act="clear-pad" style="margin-top:10px">Clear</button>
+      <button type="submit" class="btn primary">Save signature</button>`, () => {
+      if (!sigPad || !sigPad.drawn) { toast('Sign in the box first'); return false; }
+      state.settings.signature = sigPad.export();
+      save(); sigPad = null; toast('Signature saved');
+    });
+    mountPad($('#sigpad'));
+  }
+
+  // ---------- first-run setup ----------
+  let welcomeStep = 0;
+  function welcomeView() {
+    const st = state.settings;
+    const dots = `<div class="dots" aria-hidden="true">${[0, 1, 2].map((i) => `<i class="${i === welcomeStep ? 'on' : ''}"></i>`).join('')}</div>`;
+    const back = welcomeStep ? '<button class="link" data-act="welcome-back">‹ Back</button>' : '';
+    if (welcomeStep === 0) {
+      const f = (key, label, extra = '') => `<label class="field"><span>${label}</span>
+        <input data-setting="${key}" value="${esc(st[key])}" autocomplete="off" ${extra}></label>`;
+      return `<div class="welcome">
+        <img src="icons/icon-180.png" alt="" class="welcome-icon">
+        <h2>Welcome to On-Call Log</h2>
+        <p class="muted">A minute of setup, then your claim forms fill themselves in. Everything stays on this phone.</p>
+        ${dots}
+        ${f('name', 'Your full name', 'autocapitalize="words" autocomplete="name"')}
+        ${f('employeeId', 'Employee number (optional)', 'inputmode="numeric" placeholder="Skip if you prefer"')}
+        ${f('department', 'Department / unit', 'autocapitalize="words" placeholder="e.g. Lung Transplant"')}
+        <label class="field"><span>Which claim form do you use?</span>
+          <select data-setting="form">
+            <option value="alfred" ${st.form !== 'monash' ? 'selected' : ''}>Alfred Health</option>
+            <option value="monash" ${st.form === 'monash' ? 'selected' : ''}>Monash Health</option>
+          </select></label>
+        <button class="btn primary huge" data-act="welcome-next">Continue</button>
+        <button class="link small" data-act="restore">Moving phones? Restore a backup file</button>
+        <input type="file" id="restore-file" accept="application/json,.json" hidden>
+      </div>`;
+    }
+    if (welcomeStep === 1) {
+      return `<div class="welcome">
+        <h2>Your year level</h2>
+        <p class="muted">Used to estimate your recall pay after each on-call.</p>
+        ${dots}
+        <div class="list">${[1, 2, 3, 4, 5, 6].map((y) => `<button class="row" data-act="pick-year" data-year="${y}">
+          <span class="body"><span class="line1">Registrar Year ${y}${y === 6 ? ' and above' : ''}</span>
+          <span class="line2">${money(WEEKLY[y] / WEEK_HOURS)} an hour</span></span>
+          <span class="chev" aria-hidden="true">${st.year === String(y) ? '✓' : '›'}</span></button>`).join('')}</div>
+        <button class="btn outline" data-act="welcome-next">Skip for now</button>
+        ${back}
+      </div>`;
+    }
+    return `<div class="welcome">
+      <h2>Your signature</h2>
+      <p class="muted">Sign once with your finger. It goes on every claim form, so only your consultant still has to sign.</p>
+      ${dots}
+      <canvas id="sigpad" class="sigpad"></canvas>
+      <button class="btn outline" data-act="clear-pad" style="margin-top:10px">Clear</button>
+      <button class="btn primary huge" data-act="welcome-finish">Save and finish</button>
+      <button class="btn outline" data-act="welcome-skip-sign">Skip for now</button>
+      ${back}
+    </div>`;
+  }
+  function finishWelcome() {
+    state.settings.onboarded = true; save();
+    route = { tab: 'home', shiftId: null }; render(); window.scrollTo(0, 0);
+    toast('All set');
+  }
+
   // Draws the saved signature into a box on the PDF, keeping its proportions.
   function drawSignature(doc, x, y, maxW, maxH) {
     const sig = state.settings.signature;
@@ -821,7 +890,7 @@
         const data = JSON.parse(reader.result);
         if (!data || !Array.isArray(data.shifts) || !Array.isArray(data.calls)) throw new Error('bad');
         if (!confirm(`Replace everything on this phone with the backup (${data.shifts.length} on-call periods, ${data.calls.length} calls)?`)) return;
-        state = { settings: data.settings || {}, shifts: data.shifts, calls: data.calls };
+        state = { settings: { ...(data.settings || {}), onboarded: true }, shifts: data.shifts, calls: data.calls };
         save(); render(); toast('Backup restored');
       } catch { toast('That file is not an On-Call Log backup'); }
     };
@@ -862,6 +931,17 @@
       i.value = toInput(base); refreshCallForm();
     },
     'draw-signature'() { signatureForm(); },
+    'welcome-next'() {
+      if (welcomeStep === 0 && !(state.settings.name || '').trim()) { toast('Please enter your name'); $('[data-setting=name]')?.focus(); return; }
+      welcomeStep += 1; render(); window.scrollTo(0, 0);
+    },
+    'welcome-back'() { welcomeStep = Math.max(0, welcomeStep - 1); render(); window.scrollTo(0, 0); },
+    'pick-year'(el) { state.settings.year = el.dataset.year; save(); welcomeStep = 2; render(); window.scrollTo(0, 0); },
+    'welcome-finish'() {
+      if (!sigPad || !sigPad.drawn) { toast('Sign in the box, or tap Skip'); return; }
+      state.settings.signature = sigPad.export(); sigPad = null; finishWelcome();
+    },
+    'welcome-skip-sign'() { sigPad = null; finishWelcome(); },
     'clear-pad'() { if (sigPad) sigPad.clear(); },
     'remove-signature'() {
       if (!confirm('Remove your saved signature?')) return;
@@ -903,13 +983,13 @@
     wipe() {
       if (!confirm('Erase ALL on-call periods, calls and details from this phone?')) return;
       if (!confirm('Are you sure? This cannot be undone.')) return;
-      state = { settings: {}, shifts: [], calls: [] }; save(); render(); toast('All data erased');
+      state = { settings: {}, shifts: [], calls: [] }; save(); welcomeStep = 0; render(); toast('All data erased');
     },
   };
 
   document.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-tab]');
-    if (tab) { route = { tab: tab.dataset.tab, shiftId: null }; render(); window.scrollTo(0, 0); return; }
+    if (tab) { if (!state.settings.onboarded) return; route = { tab: tab.dataset.tab, shiftId: null }; render(); window.scrollTo(0, 0); return; }
     const el = e.target.closest('[data-act]');
     if (el && actions[el.dataset.act]) actions[el.dataset.act](el);
   });
@@ -917,13 +997,13 @@
   $('#sheet-form').addEventListener('change', refreshCallForm);
   document.addEventListener('input', (e) => {
     const key = e.target.dataset && e.target.dataset.setting;
-    if (key) { state.settings[key] = e.target.value; save(); if (key === 'form') render(); }
+    if (key) { state.settings[key] = e.target.value; save(); if (key === 'form' && state.settings.onboarded) render(); }
   });
   document.addEventListener('change', (e) => {
     if (e.target.id === 'restore-file' && e.target.files[0]) restore(e.target.files[0]);
   });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && route.tab === 'home' && !$('#sheet').open) render();
+    if (!document.hidden && state.settings.onboarded && route.tab === 'home' && !$('#sheet').open) render();
   });
 
   // ---------- boot ----------
@@ -931,5 +1011,7 @@
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  // People who already use the app skip the first-run setup.
+  if (!state.settings.onboarded && ((state.settings.name || '').trim() || state.shifts.length)) { state.settings.onboarded = true; save(); }
   render();
 })();

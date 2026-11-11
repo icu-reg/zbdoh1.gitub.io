@@ -252,3 +252,14 @@ dialog#sheet::backdrop { background: rgba(0,0,0,.45); }
 .group .chip { flex: 1 0 auto; padding: 7px 10px; white-space: nowrap; }
 .field input.urn { text-transform: uppercase; }
 .field input.urn::placeholder { text-transform: none; font-weight: 500; }
+
+/* ---------- first-run setup ---------- */
+body.welcoming .tabbar { display: none; }
+.welcome { padding-top: 8px; }
+.welcome h2 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+.welcome > p { margin-bottom: 6px; }
+.welcome-icon { width: 72px; height: 72px; border-radius: 18px; display: block; margin-bottom: 16px; }
+.welcome .link { display: block; margin: 8px auto 0; }
+.dots { display: flex; gap: 6px; margin: 14px 0 20px; }
+.dots i { width: 28px; height: 4px; border-radius: 2px; background: var(--line); }
+.dots i.on { background: var(--accent); }
