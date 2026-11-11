@@ -3,7 +3,7 @@
   'use strict';
 
   const KEY = 'oncall-log-v1';
-  const TYPES = { phone: 'Phone call', recall: 'Recall to hospital' };
+  const TYPES = { phone: 'Phone only', recall: 'Returned to hospital' };
 
   // ---------- state ----------
   let state = load();
@@ -93,8 +93,8 @@
     return `<button class="row" data-act="edit-call" data-id="${esc(c.id)}">
       <span class="time">${fmtTime(c.time)}</span>
       <span class="body">
-        <span class="line1">${c.urn ? 'URN ' + esc(c.urn) : 'No URN'}${
-          c.type === 'recall' ? '<span class="badge recall">Recall</span>' : ''}</span>
+        <span class="line1">${esc([c.patient, c.urn ? 'UR ' + c.urn : ''].filter(Boolean).join(' · ') || 'No patient details')}${
+          c.type === 'recall' ? '<span class="badge recall">In person</span>' : ''}</span>
         <span class="line2">${esc(meta)}${dur}</span>
       </span>
       <span class="chev" aria-hidden="true">›</span>
@@ -160,7 +160,7 @@
     if (!shifts.length) {
       return `<div class="list"><div class="empty">Nothing here yet. On-call periods appear here once you start one.</div></div>`;
     }
-    return `<button class="btn soft" data-act="range-pdf">PDF for a date range</button>
+    return `<button class="btn soft" data-act="range-pdf">Recall form for a date range</button>
       <h2 class="section-title">On-call periods</h2>
       <div class="list">${shifts.map((s) => {
         const n = shiftCalls(s.id).length;
@@ -183,7 +183,7 @@
         <p class="muted">${calls.length} call${calls.length === 1 ? '' : 's'}${recalls ? ` · ${recalls} recall${recalls === 1 ? '' : 's'}` : ''}${
           s.end ? ' · ' + fmtDur(new Date(s.end) - new Date(s.start)) : ' · still active'}</p>
         <div style="margin-top:16px">
-          <button class="btn primary" data-act="shift-pdf" data-id="${esc(id)}">Create PDF to send</button>
+          <button class="btn primary" data-act="shift-pdf" data-id="${esc(id)}">Create recall form (PDF)</button>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn soft" data-act="new-call" data-shift="${esc(id)}">+ Add call</button>
             <button class="btn outline" data-act="edit-shift" data-id="${esc(id)}">Edit times</button>
@@ -199,12 +199,13 @@
     const st = state.settings;
     const f = (key, label, extra = '') => `<label class="field"><span>${label}</span>
       <input data-setting="${key}" value="${esc(st[key])}" autocomplete="off" ${extra}></label>`;
-    return `<p class="muted small" style="margin:0 4px 14px">These details are printed at the top of every PDF.</p>
+    return `<p class="muted small" style="margin:0 4px 14px">Your name, employee number and cost centre are printed on the recall form.</p>
       ${f('name', 'Full name', 'autocapitalize="words"')}
       ${f('position', 'Position', 'placeholder="e.g. Registrar" autocapitalize="words"')}
       ${f('employeeId', 'Employee / payroll number')}
       ${f('department', 'Department / unit', 'autocapitalize="words"')}
       ${f('hospital', 'Hospital', 'autocapitalize="words"')}
+      ${f('costCentre', 'Cost centre (if you know it)')}
       <h2 class="section-title">Backup</h2>
       <div class="card">
         <p class="small muted" style="margin-bottom:12px">Everything is stored only on this phone — nothing is uploaded anywhere. Save a backup file now and then in case the phone is lost or replaced.</p>
@@ -250,14 +251,16 @@
 
   function callForm(shiftId, call) {
     const isNew = !call;
-    const c = call || { time: new Date().toISOString(), type: 'phone', urn: '', from: '', reason: '', duration: '', notes: '' };
+    const c = call || { time: new Date().toISOString(), type: 'phone', urn: '', patient: '', from: '', reason: '', duration: '', notes: '' };
     const shift = state.shifts.find((s) => s.id === shiftId);
     // Adding to a finished period: default the time to that period, not to "now".
     if (isNew && shift && shift.end) c.time = shift.start;
     const chips = recentFroms();
     const html = `
-      <label class="field"><span>Patient URN</span>
+      <label class="field"><span>Patient UR number</span>
         <input class="urn" name="urn" value="${esc(c.urn)}" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. 1234567"></label>
+      <label class="field"><span>Patient name</span>
+        <input name="patient" value="${esc(c.patient)}" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" placeholder="e.g. Jane Citizen"></label>
       <div class="seg" role="radiogroup" aria-label="Type of call">
         ${Object.entries(TYPES).map(([k, v]) => `<label><input type="radio" name="type" value="${k}" ${c.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}
       </div>
@@ -282,6 +285,7 @@
       const fields = {
         time,
         urn: d.urn.trim().toUpperCase(),
+        patient: d.patient.trim(),
         type: TYPES[d.type] ? d.type : 'phone',
         from: d.from.trim(),
         reason: d.reason.trim(),
@@ -317,7 +321,7 @@
   function rangeForm() {
     const to = new Date();
     const from = new Date(Date.now() - 13 * 864e5);
-    const html = `<p class="muted small" style="margin:0 4px 14px">Makes one PDF covering every on-call period that started between these dates — handy for a pay fortnight.</p>
+    const html = `<p class="muted small" style="margin:0 4px 14px">Makes one recall form covering every on-call period that started between these dates — handy for a pay fortnight.</p>
       <div class="two">
         <label class="field"><span>From</span><input type="date" name="from" value="${toDateInput(from)}" required></label>
         <label class="field"><span>To</span><input type="date" name="to" value="${toDateInput(to)}" required></label>
@@ -331,95 +335,81 @@
     }, 'Create');
   }
 
-  // ---------- PDF ----------
+  // ---------- PDF: Recall Form (without return to Hospital) ----------
+  const ROWS_PER_PAGE = 15;
+  const fmtDmy = (d) => { d = new Date(d); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`; };
+
+  // One row per claim: phone calls that fall within an hour of the first call are grouped together.
+  function claimRows(shifts) {
+    const ids = new Set(shifts.map((s) => s.id));
+    const calls = state.calls.filter((c) => ids.has(c.shiftId) && c.type !== 'recall')
+      .sort((a, b) => a.time.localeCompare(b.time));
+    const groups = [];
+    calls.forEach((c) => {
+      const t = new Date(c.time).getTime();
+      const g = groups[groups.length - 1];
+      if (g && t - g.start < 3600000) g.calls.push(c);
+      else groups.push({ start: t, calls: [c] });
+    });
+    return groups.map((g) => {
+      const mins = g.calls.reduce((sum, c) => sum + (Number(c.duration) || 0), 0);
+      const uniq = (k) => [...new Set(g.calls.map((c) => (c[k] || '').trim()).filter(Boolean))].join(', ');
+      return [fmtDmy(g.start), fmtTime(g.start) + (mins ? `   (${mins} min)` : ''), String(g.calls.length), uniq('patient'), uniq('urn')];
+    });
+  }
+
   function makePdf(shifts) {
     if (!window.jspdf) { toast('PDF tools did not load — reopen the app with signal once'); return; }
     shifts = [...shifts].sort((a, b) => a.start.localeCompare(b.start));
+    const rows = claimRows(shifts);
+    if (!rows.length) { toast('No phone-only calls to put on the form'); return; }
+    while (rows.length % ROWS_PER_PAGE) rows.push(['', '', '', '', '']);
+
     const st = state.settings;
     const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 14;
-    const teal = [11, 110, 105];
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 16;
 
-    doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(20);
-    doc.text('On-Call Log', M, 18);
-    doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(90);
+    const pageFrame = () => {
+      doc.setTextColor(0);
+      doc.setFont('helvetica', 'bold').setFontSize(15).text('Monash Health', M, 15);
+      doc.setFont('helvetica', 'normal').setFontSize(20).text('Recall Form (without return to Hospital)', M, 27);
+      doc.setFont('helvetica', 'italic').setFontSize(8);
+      doc.text('Doctors in Training (Victorian Public Health Sector) (AMA Victoria/ASMOF)', M, 33);
+      doc.text('Agreement 2022-2026 (and its successor Enterprise Agreements)', M, 37);
+      doc.setFont('helvetica', 'normal').setFontSize(11);
+      doc.text('Name :', M, 46);
+      doc.text('Employee Number:', M + 120, 46);
+      doc.setFont('helvetica', 'bold');
+      doc.text(st.name || '', M + 16, 46);
+      doc.text(st.employeeId || '', M + 156, 46);
+      doc.setFont('helvetica', 'normal').setFontSize(10);
+      doc.text('EACH CLAIM must be authorised by your Consultant or Unit Head.', M, 53);
+
+      doc.setFont('helvetica', 'bold').setFontSize(11);
+      doc.text('Doctors Signature:', M, H - 16);
+      doc.text('Authorised Manager:', M + 100, H - 16);
+      doc.text('Cost Centre:', M + 195, H - 16);
+      if (st.costCentre) doc.setFont('helvetica', 'normal').text(st.costCentre, M + 221, H - 16);
+      doc.setFont('helvetica', 'normal').setFontSize(9)
+        .text(String(doc.getCurrentPageInfo().pageNumber), W / 2, H - 7, { align: 'center' });
+    };
+
+    doc.autoTable({
+      startY: 57,
+      margin: { top: 57, left: M, right: M, bottom: 24 },
+      head: [['Date', 'Time of Recall & Duration', 'Number of calls in Single Hour', 'Patient Names (s)', 'Patient UR number(s)']],
+      body: rows,
+      theme: 'grid',
+      rowPageBreak: 'avoid',
+      styles: { font: 'helvetica', fontSize: 10, cellPadding: { top: 1.6, bottom: 1.6, left: 2, right: 2 }, minCellHeight: 7.4, valign: 'middle', textColor: 0, lineColor: 60, lineWidth: 0.2, overflow: 'linebreak' },
+      headStyles: { fillColor: [170, 170, 170], textColor: 0, fontStyle: 'bold', halign: 'center' },
+      columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 50 }, 2: { cellWidth: 56, halign: 'center' }, 3: { cellWidth: 'auto' }, 4: { cellWidth: 55 } },
+      didDrawPage: pageFrame,
+    });
+
     const first = shifts[0], last = shifts[shifts.length - 1];
-    const periodTxt = shifts.length === 1
-      ? fmtDate(first.start, true)
-      : `${fmtDate(first.start, true)} to ${fmtDate(last.end || last.start, true)}`;
-    doc.text(periodTxt, W - M, 18, { align: 'right' });
-    doc.setDrawColor(...teal).setLineWidth(0.6).line(M, 21.5, W - M, 21.5);
-
-    const details = [
-      ['Name', st.name], ['Position', st.position], ['Employee no.', st.employeeId],
-      ['Department', st.department], ['Hospital', st.hospital],
-    ];
-    let x = M;
-    const colW = (W - 2 * M) / details.length;
-    details.forEach(([label, value]) => {
-      doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(110).text(label.toUpperCase(), x, 27.5);
-      doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(20)
-        .text(doc.splitTextToSize(value || '—', colW - 4)[0], x, 32.5);
-      x += colW;
-    });
-
-    let y = 41;
-    let totalCalls = 0, totalRecalls = 0, totalMin = 0, n = 0;
-
-    shifts.forEach((s) => {
-      const calls = shiftCalls(s.id);
-      if (y > H - 45) { doc.addPage(); y = 18; }
-      doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(...teal);
-      const dur = s.end ? `  (${fmtDur(new Date(s.end) - new Date(s.start))})` : '  (in progress)';
-      doc.text(`On call: ${fmtDateTime(s.start, true)}  to  ${s.end ? fmtDateTime(s.end, true) : 'ongoing'}${dur}`, M, y);
-      y += 3;
-
-      const body = calls.map((c) => {
-        n += 1; totalCalls += 1;
-        if (c.type === 'recall') totalRecalls += 1;
-        totalMin += Number(c.duration) || 0;
-        return [n, fmtDate(c.time), fmtTime(c.time), c.urn || '—', TYPES[c.type] || TYPES.phone,
-          c.from || '', [c.reason, c.notes].filter(Boolean).join(' — '), c.duration === '' || c.duration == null ? '' : String(c.duration)];
-      });
-
-      doc.autoTable({
-        startY: y,
-        margin: { left: M, right: M, bottom: 16 },
-        head: [['#', 'Date', 'Time', 'Patient URN', 'Type', 'Called by / ward', 'Reason / action', 'Min']],
-        body: body.length ? body : [[{ content: 'No calls received during this on-call period.', colSpan: 8, styles: { halign: 'center', textColor: 110, fontStyle: 'italic' } }]],
-        theme: 'grid',
-        styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.8, textColor: 20, lineColor: 200, lineWidth: 0.2, overflow: 'linebreak' },
-        headStyles: { fillColor: teal, textColor: 255, fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [245, 248, 248] },
-        columnStyles: {
-          0: { cellWidth: 9, halign: 'right' }, 1: { cellWidth: 26 }, 2: { cellWidth: 15 },
-          3: { cellWidth: 28, fontStyle: 'bold' }, 4: { cellWidth: 34 }, 5: { cellWidth: 42 },
-          6: { cellWidth: 'auto' }, 7: { cellWidth: 13, halign: 'right' },
-        },
-      });
-      y = doc.lastAutoTable.finalY + 10;
-    });
-
-    if (y > H - 42) { doc.addPage(); y = 18; }
-    doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(20);
-    const hrs = totalMin ? `     Total time: ${fmtDur(totalMin * 60000)}` : '';
-    doc.text(`Total calls: ${totalCalls}     Phone calls: ${totalCalls - totalRecalls}     Recalls to hospital: ${totalRecalls}${hrs}`, M, y);
-    y += 16;
-    doc.setDrawColor(120).setLineWidth(0.3);
-    doc.line(M, y, M + 80, y); doc.line(M + 95, y, M + 140, y);
-    doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(110);
-    doc.text('Signature', M, y + 4); doc.text('Date', M + 95, y + 4);
-
-    const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p++) {
-      doc.setPage(p);
-      doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(130);
-      doc.text('CONFIDENTIAL — contains patient identifiers', M, H - 8);
-      doc.text(`Generated ${fmtDateTime(new Date(), true)}  ·  Page ${p} of ${pages}`, W - M, H - 8, { align: 'right' });
-    }
-
     const who = (st.name || '').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const name = `OnCall-Log${who ? '_' + who : ''}_${toDateInput(first.start)}${shifts.length > 1 ? '_to_' + toDateInput(last.start) : ''}.pdf`;
+    const name = `Recall-Form${who ? '_' + who : ''}_${toDateInput(first.start)}${shifts.length > 1 ? '_to_' + toDateInput(last.start) : ''}.pdf`;
     shareFile(doc.output('blob'), name, 'application/pdf');
   }
 
