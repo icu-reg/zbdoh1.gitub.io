@@ -4,7 +4,7 @@
 
   const KEY = 'oncall-log-v1';
   const TYPES = { phone: 'Remote', recall: 'Physical' };
-  const TYPE_LABELS = { phone: 'Remote (phone)', recall: 'Went in (physical)' };
+  const TYPE_LABELS = { phone: 'Remote', recall: 'Went in' };
   const HOUR = 3600000;
   // Registrar weekly rates, Victorian Doctors in Training Agreement 2022-2026 (AMA Victoria/ASMOF),
   // as at the first full pay period on or after 1 March 2025. Update here when a new agreement lands.
@@ -248,7 +248,7 @@
         <button class="btn outline" data-act="end-shift">End on-call</button>
       </section>
       <h2 class="section-title">Calls this period</h2>
-      ${callList([...calls].reverse(), 'No calls yet. Fingers crossed for a quiet one.')}`;
+      ${callList([...calls].reverse(), 'No calls yet.')}`;
   }
 
   function startTicker() {
@@ -325,7 +325,7 @@
       ${line('Remote recalls', `${p.paid} paid × min 1 h = ${hrs(p.remoteHours)} h × ${p.mult}${p.unpaid ? ` · ${p.unpaid} not paid` : ''}`, p.remotePay)}
       ${p.physical ? line('Physical recalls', `${p.physical} × min 3 h = ${hrs(p.physHours)} h · first 2 h at 1.5, then 2`, p.physPay) : ''}
       ${line('On-call allowance', `${p.periods} period${p.periods === 1 ? '' : 's'} × ${money(p.allowEach)}${shift.publicHoliday ? ' (public holiday)' : ''}`, p.allowance)}
-      <p class="muted small" style="margin-top:10px">${who}, ${money(p.rate)}/h. Travel time is not counted. An estimate only — payroll has the final say.</p>
+      <p class="muted small" style="margin-top:10px">${who}, ${money(p.rate)}/h. Travel time is not counted.</p>
     </section>`;
   }
 
@@ -536,50 +536,50 @@
     const seen = new Set();
     const froms = [...recentFroms(), ...FROM_PRESETS].filter((v) => !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())).slice(0, 7);
     const chip = (target, value, label) => `<button type="button" class="chip" data-act="chip" data-target="${target}" data-value="${esc(value)}">${esc(label ?? value)}</button>`;
-    const html = `
+    const html = `<div class="cf">
       <div class="paybanner" id="paybanner"></div>
       <div class="seg" role="radiogroup" aria-label="Type of recall">
         ${Object.entries(TYPE_LABELS).map(([k, v]) => `<label><input type="radio" name="type" value="${k}" ${c.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}
       </div>
       <div class="urn-row">
-        <label class="field"><span>Patient URN</span>
+        <label class="cf-field"><span>Patient URN</span>
           <input class="urn" name="urn" value="${esc(c.urn)}" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="1234567"></label>
-        <label class="field"><span>Initials</span>
+        <label class="cf-field"><span>Initials</span>
           <input class="urn" name="patient" value="${esc(c.patient)}" maxlength="5" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="NH"></label>
       </div>
-      <div class="group">
-        <span class="group-label">Called by</span>
-        <div class="chips">${froms.map((v) => chip('from', v)).join('')}</div>
-        <input name="from" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="or type, e.g. ED Geelong" aria-label="Called by">
-      </div>
-      <div class="group">
-        <span class="group-label">Started</span>
-        <div class="chips">
-          <button type="button" class="chip" data-act="time-adj" data-min="now">Now</button>
-          <button type="button" class="chip" data-act="time-adj" data-min="-5">5m ago</button>
-          <button type="button" class="chip" data-act="time-adj" data-min="-15">15m ago</button>
-          <button type="button" class="chip" data-act="time-adj" data-min="-30">30m ago</button>
+      <div class="cf-field"><span>Called by</span>
+        <div class="cf-line">
+          <input name="from" class="from" value="${esc(c.from)}" autocomplete="off" autocapitalize="words" placeholder="Type or pick" aria-label="Called by">
+          <div class="scroller">${froms.map((v) => chip('from', v)).join('')}</div>
         </div>
-        <input type="datetime-local" name="time" value="${toInput(c.time)}" required aria-label="Start time">
       </div>
-      <div class="group">
-        <span class="group-label">Minutes spent <em id="finish-label"></em></span>
-        <div class="chips">${[5, 10, 15, 30, 60].map((m) => chip('duration', String(m), String(m))).join('')}</div>
-        <input name="duration" value="${esc(c.duration)}" inputmode="numeric" pattern="[0-9]*" placeholder="minutes" aria-label="Minutes spent">
+      <div class="cf-field"><span>Started</span>
+        <div class="cf-line">
+          <input type="datetime-local" name="time" value="${toInput(c.time)}" required aria-label="Start time">
+          <div class="scroller">
+            <button type="button" class="chip" data-act="time-adj" data-min="now">Now</button>
+            <button type="button" class="chip" data-act="time-adj" data-min="-5">−5m</button>
+            <button type="button" class="chip" data-act="time-adj" data-min="-15">−15m</button>
+            <button type="button" class="chip" data-act="time-adj" data-min="-30">−30m</button>
+          </div>
+        </div>
       </div>
-      <div class="group" id="travel-group">
-        <span class="group-label">Travel time &amp; distance</span>
-        <input name="travel" value="${esc(c.travel)}" autocomplete="off" placeholder="e.g. 40 min, 28 km" aria-label="Travel time and distance">
+      <div class="cf-field"><span><b id="dur-label">Minutes spent</b> <em id="finish-label"></em></span>
+        <div class="cf-line">
+          <div class="scroller" id="dur-chips">${[5, 10, 15, 30, 60].map((m) => chip('duration', String(m), String(m))).join('')}</div>
+          <input name="duration" class="minutes" value="${esc(c.duration)}" inputmode="numeric" pattern="[0-9]*" placeholder="min" aria-label="Minutes spent">
+          <input name="travel" id="travel-group" class="travel" value="${esc(c.travel)}" autocomplete="off" placeholder="Travel: 40 min, 28 km" aria-label="Travel time and distance">
+        </div>
       </div>
       <details class="more" ${c.reason || c.notes ? 'open' : ''}>
-        <summary>More details</summary>
-        <label class="field"><span>Reason (added under the URN on the form)</span>
+        <summary>${isNew ? 'Reason &amp; notes' : 'Reason, notes &amp; delete'}</summary>
+        <label class="cf-field"><span>Reason (added under the URN on the form)</span>
           <input name="reason" value="${esc(c.reason)}" autocomplete="off" placeholder="e.g. which external hospital"></label>
-        <label class="field"><span>Private notes (never on the form)</span>
-          <textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
+        <label class="cf-field"><span>Private notes (never on the form)</span>
+          <input name="notes" value="${esc(c.notes)}" autocomplete="off"></label>
+        ${isNew ? '' : `<button type="button" class="btn danger" data-act="delete-call" data-id="${esc(c.id)}">Delete this call</button>`}
       </details>
-      <button type="submit" class="btn primary huge">${isNew ? 'Save call' : 'Save changes'}</button>
-      ${isNew ? '' : `<button type="button" class="btn danger" data-act="delete-call" data-id="${esc(c.id)}">Delete this call</button>`}`;
+    </div>`;
 
     openSheet(isNew ? 'Log a call' : 'Edit call', html, (d) => {
       const time = fromInput(d.time);
@@ -601,7 +601,6 @@
       toast(isNew ? 'Call logged' : 'Call updated');
     });
     refreshCallForm();
-    if (isNew) setTimeout(() => $('#sheet-body .urn')?.focus(), 50);
   }
 
   // Keeps the call sheet's live hints in step with what has been entered.
@@ -613,6 +612,8 @@
     const start = new Date(d.time);
     const physical = d.type === 'recall';
     $('#travel-group').hidden = !physical;
+    $('#dur-chips').hidden = physical;
+    $('#dur-label').textContent = physical ? 'Minutes on site · travel' : 'Minutes spent';
 
     const mins = parseInt(d.duration, 10) || 0;
     $('#finish-label').textContent = mins && !isNaN(start) ? `· finishes ${fmtTime(start.getTime() + mins * 60000)}` : '';
@@ -621,15 +622,15 @@
       el.classList.toggle('on', (d[el.dataset.target] || '').trim().toLowerCase() === el.dataset.value.toLowerCase());
     });
 
-    let cls = 'paid', text = 'This call will be paid';
+    let cls = 'paid', text = '✓ Paid call';
     if (isNaN(start)) { cls = 'unpaid'; text = 'Enter the start time'; }
-    else if (physical) text = 'Physical recall — always claimable';
+    else if (physical) text = '✓ Went in — always claimable';
     else {
       const cand = { id: formCallId, time: start.toISOString(), type: 'phone' };
       const info = paidInfo([...state.calls.filter((c) => c.id !== formCallId), cand]).get(formCallId);
       if (!info.paid) {
         cls = 'unpaid';
-        text = `No pay — within the hour of the ${fmtTime(info.by)} call. Next paid call from ${fmtTime(info.by + HOUR)}.`;
+        text = `No pay · next paid call from ${fmtTime(info.by + HOUR)}`;
       }
     }
     banner.className = 'paybanner ' + cls;

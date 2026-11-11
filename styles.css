@@ -263,3 +263,46 @@ body.welcoming .tabbar { display: none; }
 .dots { display: flex; gap: 6px; margin: 14px 0 20px; }
 .dots i { width: 28px; height: 4px; border-radius: 2px; background: var(--line); }
 .dots i.on { background: var(--accent); }
+
+/* ---------- compact call sheet (fits one screen) ---------- */
+.cf { display: flex; flex-direction: column; gap: 10px; }
+.cf [hidden] { display: none !important; }
+.cf .paybanner { margin: 0; padding: 7px 12px; font-size: 14px; border-radius: 10px; }
+.cf .seg { margin: 0; }
+.cf .seg span { padding: 8px 6px; }
+.cf .urn-row { gap: 8px; }
+.cf-field { display: block; min-width: 0; }
+.cf-field > span { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 4px 4px; }
+.cf-field > span em { font-style: normal; font-weight: 500; }
+.cf input {
+  width: 100%; min-height: 44px; padding: 8px 11px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  font-size: 16px; -webkit-appearance: none; appearance: none;
+}
+.cf input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.cf input.urn { font-size: 20px; font-weight: 700; letter-spacing: .03em; }
+.cf-line { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.cf-line > input { flex: 1 1 0; min-width: 0; }
+.cf-line > input.from { flex: 1 1 42%; }
+.cf-line > input.minutes { flex: 0 0 64px; text-align: center; }
+.cf-line > input[type="datetime-local"] { flex: 1 1 auto; }
+.scroller {
+  display: flex; gap: 6px; overflow-x: auto; flex: 1 1 58%; min-width: 0;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 2px 0;
+}
+.scroller::-webkit-scrollbar { display: none; }
+.scroller .chip { flex: none; min-height: 40px; padding: 6px 12px; }
+.cf .more { margin: 0; }
+.cf .more summary { padding: 2px 4px; font-size: 15px; }
+.cf .more[open] { display: flex; flex-direction: column; gap: 10px; }
+.cf .more .btn { margin: 0; min-height: 44px; }
+#sheet .sheet-body:has(.cf) { padding-top: 12px; }
+
+.cf-field > span b { font-weight: 600; }
+.cf-line > input.travel { flex: 1 1 0; min-width: 0; }
+.cf .paybanner { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Save lives in the sheet header as a filled button, so the sheet needs no bottom button */
+#sheet-save { background: var(--accent); color: var(--accent-text); border-radius: 999px; padding: 7px 18px; margin-right: 6px; font-size: 16px; }
+/* Let the sheet use almost the whole screen height */
+dialog#sheet, #sheet-form { max-height: calc(100dvh - env(safe-area-inset-top) - 12px); }
+.cf .seg span { white-space: nowrap; }
