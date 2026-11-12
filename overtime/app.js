@@ -154,6 +154,8 @@
     if (route.tab === 'log') { $('#title').textContent = 'Log overtime'; view.innerHTML = logView(); }
     else if (route.tab === 'claims') { $('#title').textContent = 'Claims'; view.innerHTML = claimsView(); }
     else { $('#title').textContent = 'My details'; view.innerHTML = meView(); }
+    document.body.classList.toggle('has-foot', !!view.querySelector('.wiz-foot'));
+    measureTabbar();
   }
 
   const ROLES = ['Intern', 'HMO', 'Registrar'];
@@ -202,30 +204,36 @@
         ${pendingBar()}`;
     }
     if (w.step === 2) {
-      const chips = [...new Set([w.start, ...recent('start'), '17:00', '17:30', '18:00'])].filter(Boolean).slice(0, 4);
+      if (w.manualStart) {
+        return `${head(2, 'Rostered finish time?')}
+          <input type="time" class="big-time" data-wiz="start" value="${esc(w.start)}" aria-label="Rostered finish">
+          <p class="center muted small" style="margin-top:10px">Tap the time to change it, then Next.</p>
+          ${foot('<button class="btn primary huge" data-act="wiz-next">Next</button>')}`;
+      }
       return `${head(2, 'Rostered finish time?')}
-        <input type="time" class="big-time" data-wiz="start" value="${esc(w.start)}" aria-label="Rostered finish">
-        <div class="chips-row">${chips.map((t) => `<button class="chip ${t === w.start ? 'on' : ''}" data-act="wiz-start" data-time="${t}">${t12(t)}</button>`).join('')}</div>
-        <button class="btn primary huge" data-act="wiz-next">Next</button>`;
+        <div class="choices">
+          ${['08:30', '17:00', '17:30', '18:00', '21:30'].map((t) => `<button class="choice row-choice" data-act="wiz-start" data-time="${t}"><b>${t12(t)}</b>${t === state.settings.lastStart ? '<span>Last used</span>' : ''}</button>`).join('')}
+          <button class="choice row-choice manual" data-act="wiz-manual-start"><b>Manual</b><span>Enter a time</span></button>
+        </div>`;
     }
     if (w.step === 3) {
       const isToday = w.date === isoDate(new Date());
       const ago = (min) => hhmm(Date.now() - min * 60000);
       return `${head(3, 'When did you actually finish?')}
-        ${isToday ? `<div class="choices">
+        ${isToday && !w.manualFinish ? `<div class="choices">
           ${[['Now', 0], ['15 min ago', 15], ['30 min ago', 30], ['45 min ago', 45], ['1 hour ago', 60]].map(([label, min]) => `<button class="choice row-choice" data-act="wiz-finish" data-time="${ago(min)}"><b>${label}</b><span>${t12(ago(min))}</span></button>`).join('')}
-          <label class="choice row-choice picker"><b>Pick a time</b><span>Opens the clock</span>
-            <input type="time" data-wiz-pick="finish" aria-label="Pick a time"></label>
+          <button class="choice row-choice manual" data-act="wiz-manual-finish"><b>Pick a time</b><span>Enter a time</span></button>
         </div>`
-        : `<input type="time" class="big-time" data-wiz="finish" value="${esc(w.finish)}" aria-label="Actual finish">
-           <button class="btn primary huge" data-act="wiz-finish-typed">Next</button>`}`;
+        : `<input type="time" class="big-time" data-wiz="finish" value="${esc(w.finish || (isToday ? hhmm(new Date()) : ''))}" aria-label="Actual finish">
+           <p class="center muted small" style="margin-top:10px">Tap the time to change it, then Next.</p>
+           ${foot('<button class="btn primary huge" data-act="wiz-finish-typed">Next</button>')}`}`;
     }
     if (w.step === 4) {
       return `${head(4, 'Reason for overtime?')}
         <div class="choices">${Object.entries(REASONS).map(([n, r]) => `<button class="choice reason-choice ${w.reason === n ? 'on' : ''}" data-act="wiz-reason" data-reason="${n}">
           <b class="num">${n}</b><span><b>${esc(r.short)}${r.approval ? '<em>Needs sign-off</em>' : '<em class="ok">No approval</em>'}</b>${esc(r.desc)}</span></button>`).join('')}</div>
         ${w.reason === '6' ? `<input class="big-input" data-wiz="details" value="${esc(w.details)}" maxlength="60" placeholder="Please specify (goes on the form)" aria-label="Please specify">
-          <button class="btn primary huge" data-act="wiz-next">Next</button>` : ''}`;
+          ${foot('<button class="btn primary huge" data-act="wiz-next">Next</button>')}` : ''}`;
     }
     if (w.step === 5) {
       const units = recent('unit').concat(state.settings.department ? [state.settings.department] : []);
@@ -233,7 +241,7 @@
         <input class="big-input" data-wiz="unit" value="${esc(w.unit)}" autocapitalize="words" autocomplete="off" placeholder="Unit, e.g. Respiratory" aria-label="Unit">
         ${units.length ? `<div class="chips-row">${[...new Set(units)].slice(0, 4).map((u) => `<button class="chip ${u === w.unit ? 'on' : ''}" data-act="wiz-unit" data-unit="${esc(u)}">${esc(u)}</button>`).join('')}</div>` : ''}
         <div class="seg3" role="radiogroup" aria-label="Role">${ROLES.map((r) => `<button class="${w.role === r ? 'on' : ''}" data-act="wiz-role" data-role="${r}" role="radio" aria-checked="${w.role === r}">${r}</button>`).join('')}</div>
-        <button class="btn primary huge" data-act="wiz-log">Log this day</button>`;
+        ${foot('<button class="btn primary huge" data-act="wiz-log">Log this day</button>')}`;
     }
     // step 6: logged
     const e = state.entries.find((x) => x.id === w.loggedId);
@@ -249,10 +257,13 @@
           <div class="amt">${hourlyRate() ? money(p.amount) : '—'}<small>${hourlyRate() ? 'expected pay, before tax' : 'set your level in My details'}</small></div>
         </div>
         ${u.length > 1 ? `<p class="center small muted" style="margin-bottom:12px">${u.length} days waiting to send · ${fmtMins(t.mins)}${hourlyRate() ? ` · ${money(t.amount)}` : ''}</p>` : ''}
-        <button class="btn primary huge" data-act="send-all">Save &amp; email${u.length > 1 ? ` all ${u.length} days` : ''}</button>
-        <button class="btn soft" data-act="wiz-more">Enter more overtime</button>
+        ${foot(`<button class="btn primary huge" data-act="send-all">Save &amp; email${u.length > 1 ? ` all ${u.length} days` : ''}</button>
+          <button class="btn soft" data-act="wiz-more">Enter more overtime</button>`)}
       </div>`;
   }
+
+  // Action buttons pinned to the bottom of the screen, just above the tab bar.
+  const foot = (html) => `<div class="wiz-foot">${html}</div>`;
 
   function soFar() {
     const w = wiz, bits = [];
@@ -638,8 +649,14 @@
     const t = sumOf(sorted);
     const who = (st.name || '').trim();
     const subject = `Unrostered overtime claim – ${who || 'Doctor'}${st.employeeId ? ` (${st.employeeId})` : ''} – ${range}`;
-    const lines = sorted.map((e) => `* ${ddmm(e.date)}, ${[unitOf(e), roleOf(e)].filter(Boolean).join(' ')}, rostered finish: ${t12(e.start)}, actual finish: ${t12(e.finish)}`);
-    const body = `Hello MWU,\n\nPlease see attached for my unrostered overtime claim for the following shifts:\n\n${lines.join('\n')}\n\nThanks,\n${who}${st.employeeId ? `\nEmployee number: ${st.employeeId}` : ''}`;
+    const dayName = (d) => parseDate(d).toLocaleDateString('en-AU', { weekday: 'short' });
+    const lines = sorted.map((e) => [
+      `• ${dayName(e.date)} ${ddmm(e.date)} – ${[unitOf(e), roleOf(e)].filter(Boolean).join(' ')}`,
+      `    Rostered finish: ${t12(e.start)}`,
+      `    Actual finish: ${t12(e.finish)}`,
+    ].join('\n'));
+    const shifts = `${sorted.length} shift${sorted.length === 1 ? '' : 's'}`;
+    const body = `Hello MWU,\n\nPlease see attached my unrostered overtime claim form for the following ${shifts}:\n\n${lines.join('\n\n')}\n\nThanks,\n${who}${st.employeeId ? `\nEmployee number: ${st.employeeId}` : ''}`;
     const safe = who.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const filename = `Overtime-Claim${safe ? '_' + safe : ''}_${first}${first === last ? '' : '_to_' + last}.pdf`;
     return { subject, body, filename, range, total: t };
@@ -738,7 +755,9 @@
   const actions = {
     'set-field'(el) { formOf(el).querySelector(`[name="${el.dataset.target}"]`).value = el.dataset.value; refreshLog(formOf(el)); },
     'wiz-date'(el) { wiz.date = el.dataset.date; wizGo(2); },
-    'wiz-start'(el) { wiz.start = el.dataset.time; render(); },
+    'wiz-start'(el) { wiz.start = el.dataset.time; wizGo(3); },
+    'wiz-manual-start'() { wiz.manualStart = true; render(); },
+    'wiz-manual-finish'() { wiz.manualFinish = true; if (!wiz.finish) wiz.finish = hhmm(new Date()); render(); },
     'wiz-next'() {
       if (wiz.step === 2) { if (!/^\d\d:\d\d$/.test(wiz.start || '')) { toast('Enter your rostered finish'); return; } wizGo(3); return; }
       if (wiz.step === 4) { if (!wiz.details.trim()) { toast('Please specify the reason'); return; } wizGo(5); }
@@ -753,7 +772,12 @@
     'wiz-unit'(el) { wiz.unit = el.dataset.unit; render(); },
     'wiz-role'(el) { wiz.role = el.dataset.role; render(); },
     'wiz-log'() { wizLog(); },
-    'wiz-back'() { wizGo(Math.max(1, wiz.step - 1)); },
+    'wiz-back'() {
+      // Back from a typed time returns to that step's quick choices first.
+      if (wiz.step === 2 && wiz.manualStart) { wiz.manualStart = false; render(); return; }
+      if (wiz.step === 3 && wiz.manualFinish) { wiz.manualFinish = false; render(); return; }
+      wizGo(Math.max(1, wiz.step - 1));
+    },
     'wiz-more'() { wiz = newWiz(); render(); window.scrollTo(0, 0); },
     'send-all'() { openSend(unsent()); },
     'share-claim'() { shareClaim(); },
@@ -845,7 +869,6 @@
     const pk = e.target.dataset && e.target.dataset.wizPick;
     if (pk && wiz && e.target.value) {
       if (pk === 'date') { wiz.date = e.target.value; wizGo(2); }
-      else wizFinish(e.target.value);
       return;
     }
     const form = e.target.closest('form');
@@ -856,6 +879,13 @@
     if (document.hidden || !state.settings.onboarded || route.tab !== 'log' || $('#sheet').open || !wiz) return;
     if (wiz.step === 3 || wiz.step === 6) { if (wiz.step === 6) wiz = null; render(); }
   });
+
+  // Pinned step buttons sit exactly on top of the tab bar, whatever its height on this phone.
+  function measureTabbar() {
+    const bar = $('.tabbar');
+    if (bar && bar.offsetHeight) document.documentElement.style.setProperty('--tabbar-h', bar.offsetHeight + 'px');
+  }
+  window.addEventListener('resize', measureTabbar);
 
   // ---------- boot ----------
   borrowOnCallDetails();

@@ -139,3 +139,17 @@
 .done .tick { width: 64px; height: 64px; margin: 6px auto 4px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-text); font-size: 34px; font-weight: 800; }
 .reason-choice { padding: 8px 12px; gap: 10px; }
 .wiz-q { font-size: 24px; margin: 4px 0 12px; }
+
+/* Step action buttons sit at the bottom of the screen, above the tab bar */
+.wiz-foot {
+  position: fixed; left: 0; right: 0; z-index: 4;
+  bottom: var(--tabbar-h, calc(env(safe-area-inset-bottom) + 62px));
+  padding: 10px 16px 12px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 14px);
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: 640px; margin: 0 auto;
+}
+.wiz-foot .btn { margin: 0; }
+body.has-foot main { padding-bottom: calc(var(--tabbar-h, 80px) + 150px); }
+.choice.manual { border-style: dashed; }
+body.has-foot #toast { bottom: calc(var(--tabbar-h, 80px) + 150px); }
