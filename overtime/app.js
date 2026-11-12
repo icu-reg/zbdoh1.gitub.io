@@ -158,10 +158,13 @@
 
   function freshDraft() {
     const now = new Date();
+    const start = state.settings.lastStart || '17:00';
+    // Opened before the usual finish time (e.g. the next morning): leave "Left at" for them to fill in.
+    const before = hhmm(now) < start && hhmm(now) > '06:00';
     return {
       date: isoDate(now),
-      start: state.settings.lastStart || '17:00',
-      finish: hhmm(now),
+      start,
+      finish: before ? '' : hhmm(now),
       reason: state.settings.lastReason || '1',
       details: '',
     };
@@ -231,9 +234,9 @@
     const d = Object.fromEntries(new FormData(form).entries());
     const m = minutesOf(d);
     const r = form.querySelector('#result');
-    if (!m) {
+    if (!m || m > 16 * 60) {
       r.className = 'result none';
-      r.innerHTML = '<div><div class="hrs">—</div><div class="split">Enter your rostered finish and when you left</div></div>';
+      r.innerHTML = `<div><div class="hrs">—</div><div class="split">${m ? 'Over 16 hours — check the times' : 'Enter your rostered finish and when you left'}</div></div>`;
     } else {
       const p = payOf(m), rate = hourlyRate();
       const split = `${hrs(p.first)} h at 150%${p.rest ? ` + ${hrs(p.rest)} h at 200%` : ''}`;

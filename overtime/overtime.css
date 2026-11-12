@@ -30,7 +30,7 @@
   font-size: 17px; -webkit-appearance: none; appearance: none;
 }
 .ot input:focus, .ot select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
-.ot input[type="time"] { font-size: 22px; font-weight: 700; text-align: center; }
+.ot input[type="time"] { font-size: 19px; font-weight: 700; text-align: center; padding: 8px 6px; }
 .ot-line { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .ot-line > input { flex: 1 1 0; min-width: 0; }
 .ot-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -82,3 +82,4 @@
 .steps-list { margin: 0 0 14px; padding-left: 22px; }
 .steps-list li { margin: 6px 0; }
 #view:has(#log-form) { padding-top: 12px; }
+.ot input[type="date"] { flex: 0 0 auto; width: auto; min-width: 140px; }
