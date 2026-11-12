@@ -1,5 +1,5 @@
 // Offline support for the Overtime app: network first (so updates arrive), cached copy when offline.
-const CACHE = 'overtime-v1';
+const CACHE = 'overtime-v2';
 const SHELL = [
   './', 'index.html', 'app.js', 'overtime.css', 'manifest.webmanifest',
   'form/unrostered-overtime-claim.pdf',

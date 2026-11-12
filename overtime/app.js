@@ -171,9 +171,9 @@
   function entryFields(e, opts = {}) {
     const startChips = [...new Set([e.start, state.settings.lastStart, ...recentStarts(), '17:00', '17:30', '18:00', '22:00', '08:00'].filter(Boolean))].slice(0, 6);
     return `
-      <div class="ot-field"><span>Date</span>
+      <div class="ot-field">
         <div class="ot-line">
-          <input type="date" name="date" value="${esc(e.date)}" required>
+          <input type="date" name="date" value="${esc(e.date)}" required aria-label="Date">
           <div class="scroller">
             <button type="button" class="chip" data-act="set-date" data-days="0">Today</button>
             <button type="button" class="chip" data-act="set-date" data-days="-1">Yesterday</button>
@@ -195,13 +195,12 @@
         </div>
       </div>
       <div class="result" id="result"></div>
-      <div class="ot-field"><span>Reason</span>
-        <div class="reasons">${Object.entries(REASONS).map(([n, r]) => `<button type="button" class="reason ${String(e.reason) === n ? 'on' : ''}" data-act="set-reason" data-reason="${n}"><b>${n}</b>${esc(r.short)}</button>`).join('')}</div>
+      <div class="ot-field"><span>Reason (number on the form)</span>
+        <div class="scroller reasons">${Object.entries(REASONS).map(([n, r]) => `<button type="button" class="reason ${String(e.reason) === n ? 'on' : ''}" data-act="set-reason" data-reason="${n}"><b>${n}</b> ${esc(r.short)}</button>`).join('')}</div>
         <input type="hidden" name="reason" value="${esc(e.reason)}">
       </div>
       <p class="note" id="approval-note" hidden></p>
-      <label class="ot-field"><span id="details-label">Details (optional)</span>
-        <input name="details" value="${esc(e.details)}" autocomplete="off" maxlength="60" placeholder="e.g. Covering Dr Smith, sick"></label>
+      <input name="details" id="details-input" value="${esc(e.details)}" autocomplete="off" maxlength="60" placeholder="Details (optional), e.g. covering Dr Smith" aria-label="Details">
       ${opts.covid ? `<label class="ot-field"><span>COVID related</span>
         <select name="covid"><option ${e.covid !== 'Yes' ? 'selected' : ''}>No</option><option ${e.covid === 'Yes' ? 'selected' : ''}>Yes</option></select></label>` : ''}`;
   }
@@ -247,7 +246,7 @@
     const note = form.querySelector('#approval-note');
     note.hidden = !reason || !reason.approval;
     if (reason && reason.approval) note.textContent = `Reason ${d.reason} needs your Head of Unit or consultant to sign the form. Reason 1 does not.`;
-    form.querySelector('#details-label').textContent = d.reason === '6' ? 'Details (required for Other)' : 'Details (optional)';
+    form.querySelector('#details-input').placeholder = d.reason === '6' ? 'Details — required for Other' : 'Details (optional), e.g. covering Dr Smith';
     if (form.id === 'log-form') draft = { ...draft, ...d };
   }
 
@@ -682,6 +681,7 @@
       const form = formOf(el);
       form.querySelector('[name=reason]').value = el.dataset.reason;
       form.querySelectorAll('.reason').forEach((b) => b.classList.toggle('on', b === el));
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       refreshLog(form);
     },
     'save-later'() { if (saveDraft()) { render(); toast('Saved — email it any time from Claims'); } },
