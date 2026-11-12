@@ -26,18 +26,18 @@
 
   // Endorsed reasons, as numbered on the Alfred Health Unrostered Overtime Claim Form.
   const REASONS = {
-    1: { short: 'Sick leave cover', long: 'Covering JMS sick leave or another unscheduled absence', approval: false },
-    2: { short: 'Deteriorating patient', long: 'Clinically deteriorating patient (MET, Code Blue, ICU transfer, urgent family meeting)', approval: true },
-    3: { short: 'Round / theatre / clinic', long: 'Early or late ward round, theatre list or clinic requested by the consultant', approval: true },
-    4: { short: 'Unit activity', long: 'Compulsory unit activity outside rostered hours (audit, M&M, radiology meeting)', approval: true },
-    5: { short: 'Urgent admit / discharge', long: 'Urgent admission or discharge that could not be handed over', approval: true },
-    6: { short: 'Other', long: 'Other (must be authorised under the JMS unrostered overtime guideline)', approval: true },
+    1: { short: 'Sick leave cover', desc: "Sick or unplanned absence", long: 'Covering JMS sick leave or another unscheduled absence', approval: false },
+    2: { short: 'Deteriorating patient', desc: "MET, Code Blue, ICU transfer", long: 'Clinically deteriorating patient (MET, Code Blue, ICU transfer, urgent family meeting)', approval: true },
+    3: { short: 'Ward round / theatre', desc: "Early or late, consultant asked", long: 'Early or late ward round, theatre list or clinic requested by the consultant', approval: true },
+    4: { short: 'Unit activity', desc: "Audit, M&M, radiology meeting", long: 'Compulsory unit activity outside rostered hours (audit, M&M, radiology meeting)', approval: true },
+    5: { short: 'Urgent admission', desc: "Or discharge, can’t hand over", long: 'Urgent admission or discharge that could not be handed over', approval: true },
+    6: { short: 'Other', desc: "Authorised under the guideline", long: 'Other (must be authorised under the JMS unrostered overtime guideline)', approval: true },
   };
 
   // ---------- state ----------
   let state = load();
   let route = { tab: 'log' };
-  let draft = null;
+  let wiz = null; // the step-by-step log in progress
 
   function load() {
     const base = { settings: {}, entries: [] };
@@ -151,85 +151,167 @@
       if (welcomeStep === 2) mountPad($('#sigpad'));
       return;
     }
-    if (route.tab === 'log') { $('#title').textContent = 'Log overtime'; view.innerHTML = logView(); refreshLog(); }
+    if (route.tab === 'log') { $('#title').textContent = 'Log overtime'; view.innerHTML = logView(); }
     else if (route.tab === 'claims') { $('#title').textContent = 'Claims'; view.innerHTML = claimsView(); }
     else { $('#title').textContent = 'My details'; view.innerHTML = meView(); }
   }
 
-  function freshDraft() {
-    const now = new Date();
-    const start = state.settings.lastStart || '17:00';
-    // Opened before the usual finish time (e.g. the next morning): leave "Left at" for them to fill in.
-    const before = hhmm(now) < start && hhmm(now) > '06:00';
+  const ROLES = ['Intern', 'HMO', 'Registrar'];
+  const defaultRole = () => {
+    const l = state.settings.level || '';
+    return l.startsWith('reg') ? 'Registrar' : l === 'intern' ? 'Intern' : 'HMO';
+  };
+  const unitOf = (e) => e.unit || state.settings.department || '';
+  const roleOf = (e) => e.role || defaultRole();
+  // "17:00" -> "5pm", "17:45" -> "5:45pm"
+  const t12 = (t) => {
+    const [h, m] = String(t).split(':').map(Number);
+    if (isNaN(h)) return t;
+    const hr = h % 12 || 12;
+    return `${hr}${m ? ':' + pad(m) : ''}${h < 12 ? 'am' : 'pm'}`;
+  };
+  const recent = (key) => [...new Set([...state.entries].sort(byWhen).reverse().map((e) => e[key]).filter(Boolean))];
+
+  function newWiz() {
     return {
-      date: isoDate(now),
-      start,
-      finish: before ? '' : hhmm(now),
-      reason: state.settings.lastReason || '1',
-      details: '',
+      step: 1, date: '', start: state.settings.lastStart || '17:00', finish: '', reason: '', details: '',
+      unit: state.settings.lastUnit || state.settings.department || '', role: state.settings.lastRole || defaultRole(), loggedId: null,
     };
   }
 
-  // The fields shared by the Log page and the edit sheet.
-  function entryFields(e, opts = {}) {
-    const startChips = [...new Set([e.start, state.settings.lastStart, ...recentStarts(), '17:00', '17:30', '18:00', '22:00', '08:00'].filter(Boolean))].slice(0, 6);
-    return `
-      <div class="ot-field">
-        <div class="ot-line">
-          <input type="date" name="date" value="${esc(e.date)}" required aria-label="Date">
-          <div class="scroller">
-            <button type="button" class="chip" data-act="set-date" data-days="0">Today</button>
-            <button type="button" class="chip" data-act="set-date" data-days="-1">Yesterday</button>
-          </div>
-        </div>
+  // ---------- step-by-step log ----------
+  function logView() {
+    if (!wiz) wiz = newWiz();
+    const w = wiz;
+    const head = (n, q) => `<div class="wiz-head">
+        ${n > 1 ? '<button class="link" data-act="wiz-back">‹ Back</button>' : '<span></span>'}
+        <span class="wiz-dots" aria-label="Step ${n} of 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>
       </div>
+      ${n > 1 ? `<p class="wiz-sofar">${esc(soFar())}</p>` : ''}
+      <h2 class="wiz-q">${q}</h2>`;
+
+    if (w.step === 1) {
+      const today = isoDate(new Date());
+      const day = (off) => isoDate(Date.now() + off * 864e5);
+      return `${installCard()}${head(1, 'Which day?')}
+        <div class="choices">
+          ${[['Today', 0], ['Yesterday', -1], ['Day before', -2]].map(([label, off]) => `<button class="choice" data-act="wiz-date" data-date="${day(off)}"><b>${label}</b><span>${esc(fmtDay(day(off)))}</span></button>`).join('')}
+          <label class="choice picker"><b>Pick a date</b><span>Opens the calendar</span>
+            <input type="date" data-wiz-pick="date" max="${today}" aria-label="Pick a date"></label>
+        </div>
+        ${pendingBar()}`;
+    }
+    if (w.step === 2) {
+      const chips = [...new Set([w.start, ...recent('start'), '17:00', '17:30', '18:00'])].filter(Boolean).slice(0, 4);
+      return `${head(2, 'Rostered finish time?')}
+        <input type="time" class="big-time" data-wiz="start" value="${esc(w.start)}" aria-label="Rostered finish">
+        <div class="chips-row">${chips.map((t) => `<button class="chip ${t === w.start ? 'on' : ''}" data-act="wiz-start" data-time="${t}">${t12(t)}</button>`).join('')}</div>
+        <button class="btn primary huge" data-act="wiz-next">Next</button>`;
+    }
+    if (w.step === 3) {
+      const isToday = w.date === isoDate(new Date());
+      const ago = (min) => hhmm(Date.now() - min * 60000);
+      return `${head(3, 'When did you actually finish?')}
+        ${isToday ? `<div class="choices">
+          ${[['Now', 0], ['15 min ago', 15], ['30 min ago', 30], ['45 min ago', 45], ['1 hour ago', 60]].map(([label, min]) => `<button class="choice row-choice" data-act="wiz-finish" data-time="${ago(min)}"><b>${label}</b><span>${t12(ago(min))}</span></button>`).join('')}
+          <label class="choice row-choice picker"><b>Pick a time</b><span>Opens the clock</span>
+            <input type="time" data-wiz-pick="finish" aria-label="Pick a time"></label>
+        </div>`
+        : `<input type="time" class="big-time" data-wiz="finish" value="${esc(w.finish)}" aria-label="Actual finish">
+           <button class="btn primary huge" data-act="wiz-finish-typed">Next</button>`}`;
+    }
+    if (w.step === 4) {
+      return `${head(4, 'Reason for overtime?')}
+        <div class="choices">${Object.entries(REASONS).map(([n, r]) => `<button class="choice reason-choice ${w.reason === n ? 'on' : ''}" data-act="wiz-reason" data-reason="${n}">
+          <b class="num">${n}</b><span><b>${esc(r.short)}${r.approval ? '<em>Needs sign-off</em>' : '<em class="ok">No approval</em>'}</b>${esc(r.desc)}</span></button>`).join('')}</div>
+        ${w.reason === '6' ? `<input class="big-input" data-wiz="details" value="${esc(w.details)}" maxlength="60" placeholder="Please specify (goes on the form)" aria-label="Please specify">
+          <button class="btn primary huge" data-act="wiz-next">Next</button>` : ''}`;
+    }
+    if (w.step === 5) {
+      const units = recent('unit').concat(state.settings.department ? [state.settings.department] : []);
+      return `${head(5, 'Unit and role?')}
+        <input class="big-input" data-wiz="unit" value="${esc(w.unit)}" autocapitalize="words" autocomplete="off" placeholder="Unit, e.g. Respiratory" aria-label="Unit">
+        ${units.length ? `<div class="chips-row">${[...new Set(units)].slice(0, 4).map((u) => `<button class="chip ${u === w.unit ? 'on' : ''}" data-act="wiz-unit" data-unit="${esc(u)}">${esc(u)}</button>`).join('')}</div>` : ''}
+        <div class="seg3" role="radiogroup" aria-label="Role">${ROLES.map((r) => `<button class="${w.role === r ? 'on' : ''}" data-act="wiz-role" data-role="${r}" role="radio" aria-checked="${w.role === r}">${r}</button>`).join('')}</div>
+        <button class="btn primary huge" data-act="wiz-log">Log this day</button>`;
+    }
+    // step 6: logged
+    const e = state.entries.find((x) => x.id === w.loggedId);
+    const u = unsent(), t = sumOf(u);
+    if (!e) { wiz = newWiz(); return logView(); }
+    const m = minutesOf(e), p = payOf(m);
+    return `<div class="done">
+        <div class="tick" aria-hidden="true">✓</div>
+        <h2 class="wiz-q" style="text-align:center">Day logged</h2>
+        <p class="center muted">${esc(fmtDay(e.date))} · ${esc(unitOf(e))} ${esc(roleOf(e))} · ${t12(e.start)} to ${t12(e.finish)}</p>
+        <div class="result" style="margin:16px 0">
+          <div><div class="hrs">${fmtMins(m)}</div><div class="split">${fmtMins(p.first)} at 150%${p.rest ? ` + ${fmtMins(p.rest)} at 200%` : ''}</div></div>
+          <div class="amt">${hourlyRate() ? money(p.amount) : '—'}<small>${hourlyRate() ? 'expected pay, before tax' : 'set your level in My details'}</small></div>
+        </div>
+        ${u.length > 1 ? `<p class="center small muted" style="margin-bottom:12px">${u.length} days waiting to send · ${fmtMins(t.mins)}${hourlyRate() ? ` · ${money(t.amount)}` : ''}</p>` : ''}
+        <button class="btn primary huge" data-act="send-all">Save &amp; email${u.length > 1 ? ` all ${u.length} days` : ''}</button>
+        <button class="btn soft" data-act="wiz-more">Enter more overtime</button>
+      </div>`;
+  }
+
+  function soFar() {
+    const w = wiz, bits = [];
+    if (w.date) bits.push(fmtDay(w.date));
+    if (w.step > 2 && w.start) bits.push(`rostered ${t12(w.start)}`);
+    if (w.step > 3 && w.finish) bits.push(`finished ${t12(w.finish)}`);
+    if (w.step > 4 && w.reason) bits.push(`reason ${w.reason}`);
+    return bits.join(' · ');
+  }
+
+  function pendingBar() {
+    const u = unsent(), t = sumOf(u);
+    return u.length ? `<div class="pending" style="margin-top:16px">
+        <p><b>${u.length} unsent</b> · ${fmtMins(t.mins)}${hourlyRate() ? ` · ${money(t.amount)}` : ''}</p>
+        <button class="btn primary" data-act="send-all">Email all</button></div>` : '';
+  }
+
+  function wizGo(step) { wiz.step = step; render(); window.scrollTo(0, 0); }
+  function wizFinish(time) {
+    wiz.finish = time;
+    const m = minutesOf(wiz);
+    if (!m || m > 16 * 60) { toast('That finish time doesn’t look right — check it'); render(); return; }
+    wizGo(4);
+  }
+  function wizLog() {
+    const unit = (wiz.unit || '').trim();
+    if (!unit) { toast('Add your unit'); $('[data-wiz=unit]')?.focus(); return; }
+    const entry = { id: uid(), date: wiz.date, start: wiz.start, finish: wiz.finish, reason: wiz.reason,
+      details: wiz.reason === '6' ? wiz.details.trim() : '', unit, role: wiz.role, covid: 'No', sentAt: null };
+    state.entries.push(entry);
+    Object.assign(state.settings, { lastStart: entry.start, lastUnit: unit, lastRole: entry.role });
+    save();
+    wiz.loggedId = entry.id;
+    wizGo(6);
+  }
+
+  // ---------- edit sheet fields ----------
+  function entryFields(e) {
+    return `
+      <label class="ot-field"><span>Date</span><input type="date" name="date" value="${esc(e.date)}" required></label>
       <div class="ot-times">
-        <div class="ot-field"><span>Rostered finish</span>
-          <input type="time" name="start" value="${esc(e.start)}" required>
-          <div class="scroller ot-under">${startChips.slice(0, 3).map((t) => `<button type="button" class="chip" data-act="set-field" data-target="start" data-value="${t}">${t}</button>`).join('')}</div>
-        </div>
-        <div class="ot-field"><span>Left at</span>
-          <input type="time" name="finish" value="${esc(e.finish)}" required>
-          <div class="ot-under">
-            <button type="button" class="chip" data-act="set-now">Now</button>
-            <button type="button" class="chip" data-act="nudge" data-min="-15">−15</button>
-            <button type="button" class="chip" data-act="nudge" data-min="15">+15</button>
-          </div>
-        </div>
+        <label class="ot-field"><span>Rostered finish</span><input type="time" name="start" value="${esc(e.start)}" required></label>
+        <label class="ot-field"><span>Actual finish</span><input type="time" name="finish" value="${esc(e.finish)}" required></label>
       </div>
       <div class="result" id="result"></div>
-      <div class="ot-field"><span>Reason (number on the form)</span>
-        <div class="scroller reasons">${Object.entries(REASONS).map(([n, r]) => `<button type="button" class="reason ${String(e.reason) === n ? 'on' : ''}" data-act="set-reason" data-reason="${n}"><b>${n}</b> ${esc(r.short)}</button>`).join('')}</div>
-        <input type="hidden" name="reason" value="${esc(e.reason)}">
-      </div>
+      <label class="ot-field"><span>Reason</span>
+        <select name="reason">${Object.entries(REASONS).map(([n, r]) => `<option value="${n}" ${String(e.reason) === n ? 'selected' : ''}>${n}. ${esc(r.short)}</option>`).join('')}</select></label>
       <p class="note" id="approval-note" hidden></p>
-      <input name="details" id="details-input" value="${esc(e.details)}" autocomplete="off" maxlength="60" placeholder="Details (optional), e.g. covering Dr Smith" aria-label="Details">
-      ${opts.covid ? `<label class="ot-field"><span>COVID related</span>
-        <select name="covid"><option ${e.covid !== 'Yes' ? 'selected' : ''}>No</option><option ${e.covid === 'Yes' ? 'selected' : ''}>Yes</option></select></label>` : ''}`;
-  }
-
-  function recentStarts() {
-    return [...state.entries].sort(byWhen).reverse().map((e) => e.start);
-  }
-
-  function logView() {
-    if (!draft) draft = freshDraft();
-    const u = unsent(), t = sumOf(u);
-    return `${installCard()}
-      <form class="ot" id="log-form" novalidate>
-        ${entryFields(draft)}
-        <div class="ot-actions">
-          <button type="button" class="btn soft" data-act="save-later">Save for later</button>
-          <button type="button" class="btn primary" data-act="save-send">Save &amp; email</button>
-        </div>
-      </form>
-      ${u.length ? `<div class="pending" style="margin-top:14px">
-        <p><b>${u.length} unsent</b> · ${fmtMins(t.mins)}${hourlyRate() ? ` · ${money(t.amount)}` : ''}</p>
-        <button class="btn primary" data-act="send-all">Email all</button></div>` : ''}`;
+      <input name="details" id="details-input" value="${esc(e.details)}" autocomplete="off" maxlength="60" placeholder="Please specify (for Other)" aria-label="Please specify">
+      <div class="ot-times">
+        <label class="ot-field"><span>Unit</span><input name="unit" value="${esc(unitOf(e))}" autocapitalize="words" autocomplete="off"></label>
+        <label class="ot-field"><span>Role</span><select name="role">${ROLES.map((r) => `<option ${roleOf(e) === r ? 'selected' : ''}>${r}</option>`).join('')}</select></label>
+      </div>
+      <label class="ot-field"><span>COVID related</span>
+        <select name="covid"><option ${e.covid !== 'Yes' ? 'selected' : ''}>No</option><option ${e.covid === 'Yes' ? 'selected' : ''}>Yes</option></select></label>`;
   }
 
   // Keeps the live total, chip highlights and reason note in step with what has been entered.
-  function refreshLog(form = $('#log-form') || $('#sheet-form')) {
+  function refreshLog(form = $('#sheet-form')) {
     if (!form || !form.querySelector('#result')) return;
     const d = Object.fromEntries(new FormData(form).entries());
     const m = minutesOf(d);
@@ -239,7 +321,7 @@
       r.innerHTML = `<div><div class="hrs">—</div><div class="split">${m ? 'Over 16 hours — check the times' : 'Enter your rostered finish and when you left'}</div></div>`;
     } else {
       const p = payOf(m), rate = hourlyRate();
-      const split = `${hrs(p.first)} h at 150%${p.rest ? ` + ${hrs(p.rest)} h at 200%` : ''}`;
+      const split = `${fmtMins(p.first)} at 150%${p.rest ? ` + ${fmtMins(p.rest)} at 200%` : ''}`;
       r.className = 'result';
       r.innerHTML = `<div><div class="hrs">${fmtMins(m)}</div><div class="split">${split}</div></div>
         <div class="amt">${rate ? money(p.amount) : '—'}<small>${rate ? 'before tax' : 'set your level'}</small></div>`;
@@ -249,8 +331,7 @@
     const note = form.querySelector('#approval-note');
     note.hidden = !reason || !reason.approval;
     if (reason && reason.approval) note.textContent = `Reason ${d.reason} needs your Head of Unit or consultant to sign the form. Reason 1 does not.`;
-    form.querySelector('#details-input').placeholder = d.reason === '6' ? 'Details — required for Other' : 'Details (optional), e.g. covering Dr Smith';
-    if (form.id === 'log-form') draft = { ...draft, ...d };
+    form.querySelector('#details-input').hidden = d.reason !== '6';
   }
 
   function claimsView() {
@@ -263,7 +344,7 @@
       return `<button class="row" data-act="edit" data-id="${esc(e.id)}">
         <span class="time">${esc(ddmm(e.date))}</span>
         <span class="body"><span class="line1">${esc(e.start)} – ${esc(e.finish)} · ${fmtMins(m)}</span>
-        <span class="line2">${e.reason}. ${esc(REASONS[e.reason]?.short || '')}${e.details ? ' · ' + esc(e.details) : ''}${e.sentAt ? ` · sent ${esc(fmtDay(isoDate(e.sentAt)))}` : ''}</span></span>
+        <span class="line2">${esc([unitOf(e), roleOf(e)].filter(Boolean).join(' '))} · reason ${e.reason}${e.sentAt ? ` · sent ${esc(fmtDay(isoDate(e.sentAt)))}` : ''}</span></span>
         ${hourlyRate() ? `<span class="small" style="font-weight:600">${money(p.amount)}</span>` : ''}
         <span class="chev" aria-hidden="true">›</span></button>`;
     };
@@ -292,7 +373,6 @@
     return `<p class="muted small" style="margin:0 4px 14px">These details go on your claim form.</p>
       ${f('name', 'Full name', 'autocapitalize="words"')}
       ${f('employeeId', 'Employee number (optional)', 'inputmode="numeric"')}
-      ${f('department', 'Department / unit', 'autocapitalize="words"')}
       <h2 class="section-title">Pay</h2>
       <label class="field"><span>Level</span>
         <select data-setting="level"><option value="">Choose…</option>${LEVELS.map(([id, name, wk, h]) => `<option value="${id}" ${st.level === id ? 'selected' : ''}>${esc(name)} — ${money(wk / h)}/h</option>`).join('')}</select></label>
@@ -335,11 +415,10 @@
       return `<div class="welcome">
         <img src="icons/icon-180.png" alt="" class="welcome-icon">
         <h2>Overtime claims, done in seconds</h2>
-        <p class="muted">Set up once. After that: enter when you were rostered to finish and when you left, and the claim form fills itself in.</p>
+        <p class="muted">Set up once. After that, a few taps per day and the claim form fills itself in.</p>
         ${dots}
         ${f('name', 'Your full name', 'autocapitalize="words" autocomplete="name"')}
         ${f('employeeId', 'Employee number (optional)', 'inputmode="numeric" placeholder="Skip if you prefer"')}
-        ${f('department', 'Department / unit', 'autocapitalize="words" placeholder="e.g. General Medicine"')}
         <button class="btn primary huge" data-act="welcome-next">Continue</button>
         <button class="link small" data-act="restore">Moving phones? Restore a backup file</button>
         <input type="file" id="restore-file" accept="application/json,.json" hidden>
@@ -370,7 +449,7 @@
   }
   function finishWelcome() {
     state.settings.onboarded = true; save();
-    route = { tab: 'log' }; draft = null; render(); window.scrollTo(0, 0);
+    route = { tab: 'log' }; wiz = null; render(); window.scrollTo(0, 0);
     toast('All set');
   }
   // Someone who already uses On-Call Log in this browser gets their details filled in for them.
@@ -380,7 +459,8 @@
       const o = JSON.parse(localStorage.getItem('oncall-log-v1'));
       const s = o && o.settings;
       if (!s) return;
-      ['name', 'employeeId', 'department', 'signature'].forEach((k) => { if (s[k] && !state.settings[k]) state.settings[k] = s[k]; });
+      if (s.department && !state.settings.lastUnit) state.settings.lastUnit = s.department;
+      ['name', 'employeeId', 'signature'].forEach((k) => { if (s[k] && !state.settings[k]) state.settings[k] = s[k]; });
       if (s.year && !state.settings.level) state.settings.level = 'reg' + s.year;
       if (parseFloat(s.customRate) > 0 && !state.settings.customRate) state.settings.customRate = s.customRate;
     } catch { /* nothing to borrow */ }
@@ -451,7 +531,7 @@
   $('#sheet').addEventListener('cancel', () => { sheetSubmit = null; pendingSend = null; });
 
   function editSheet(entry) {
-    openSheet('Edit overtime', `<div class="ot">${entryFields(entry, { covid: true })}
+    openSheet('Edit overtime', `<div class="ot">${entryFields(entry)}
         ${entry.sentAt ? `<button type="button" class="btn outline" data-act="unsend" data-id="${esc(entry.id)}">Mark as not sent</button>` : ''}
         <button type="button" class="btn danger" data-act="delete" data-id="${esc(entry.id)}">Delete</button></div>`, (d) => {
       const err = validate(d);
@@ -467,24 +547,12 @@
     if (!d.start || !d.finish) return 'Enter both times';
     if (!minutesOf(d)) return 'Check the times';
     if (minutesOf(d) > 16 * 60) return 'That is over 16 hours — check the times';
-    if (d.reason === '6' && !String(d.details || '').trim()) return 'Add details for “Other”';
+    if (d.reason === '6' && !String(d.details || '').trim()) return 'Please specify the reason for “Other”';
+    if ('unit' in d && !String(d.unit || '').trim()) return 'Add your unit';
     return '';
   }
-  const clean = (d) => ({ date: d.date, start: d.start, finish: d.finish, reason: String(d.reason || '1'), details: String(d.details || '').trim() });
-
-  function saveDraft() {
-    const form = $('#log-form');
-    const d = Object.fromEntries(new FormData(form).entries());
-    const err = validate(d);
-    if (err) { toast(err); return null; }
-    const entry = { id: uid(), ...clean(d), covid: 'No', sentAt: null };
-    state.entries.push(entry);
-    state.settings.lastStart = entry.start;
-    state.settings.lastReason = entry.reason;
-    save();
-    draft = null;
-    return entry;
-  }
+  const clean = (d) => ({ date: d.date, start: d.start, finish: d.finish, reason: String(d.reason || '1'),
+    details: d.reason === '6' ? String(d.details || '').trim() : '', unit: String(d.unit || '').trim(), role: ROLES.includes(d.role) ? d.role : defaultRole() });
 
   // ---------- the claim form ----------
   let templateBytes = null;
@@ -527,7 +595,7 @@
         if (e) {
           text(`DateRow${r}`, ddmm(e.date), 11);
           pick(`Dropdown${r}`, String(e.reason));
-          text(`Patient UR NumberRow${r}`, e.details, 8);
+          text(`Patient UR NumberRow${r}`, `${unitOf(e)} ${roleOf(e)}`.trim(), 8);
           text(`Start timeRow${r}`, e.start, 11);
           text(`Finish timeRow${r}`, e.finish, 11);
           pick(`Dropdown${r + 6}`, e.covid === 'Yes' ? 'Yes' : 'No');
@@ -539,7 +607,7 @@
       text('Other must be authorised as per the JMS unrostered overtime guideline Please specify', other, 9);
       text('Name', st.name, 11);
       text('Employee1', st.employeeId, 11);
-      text('Department', st.department, 11);
+      text('Department', [...new Set(chunk.map(unitOf).filter(Boolean))].join(', '), 11);
       const page = doc.getPage(0);
       if (st.signature) {
         text('Employee2', '');
@@ -570,8 +638,8 @@
     const t = sumOf(sorted);
     const who = (st.name || '').trim();
     const subject = `Unrostered overtime claim – ${who || 'Doctor'}${st.employeeId ? ` (${st.employeeId})` : ''} – ${range}`;
-    const lines = sorted.map((e) => `• ${fmtDay(e.date)}: ${e.start}–${e.finish} (${fmtMins(minutesOf(e))}), reason ${e.reason}${e.details ? ` – ${e.details}` : ''}`);
-    const body = `Hi Medical Workforce,\n\nPlease find attached my unrostered overtime claim form for ${range}.\n\n${lines.join('\n')}\n\nTotal: ${fmtMins(t.mins)}\n\nThanks,\n${who}${st.employeeId ? `\nEmployee number: ${st.employeeId}` : ''}${st.department ? `\n${st.department}` : ''}`;
+    const lines = sorted.map((e) => `* ${ddmm(e.date)}, ${[unitOf(e), roleOf(e)].filter(Boolean).join(' ')}, rostered finish: ${t12(e.start)}, actual finish: ${t12(e.finish)}`);
+    const body = `Hello MWU,\n\nPlease see attached for my unrostered overtime claim for the following shifts:\n\n${lines.join('\n')}\n\nThanks,\n${who}${st.employeeId ? `\nEmployee number: ${st.employeeId}` : ''}`;
     const safe = who.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const filename = `Overtime-Claim${safe ? '_' + safe : ''}_${first}${first === last ? '' : '_to_' + last}.pdf`;
     return { subject, body, filename, range, total: t };
@@ -659,7 +727,7 @@
         if (!data || !Array.isArray(data.entries)) throw new Error('bad');
         if (!confirm(`Replace everything on this phone with the backup (${data.entries.length} overtime days)?`)) return;
         state = { settings: { ...(data.settings || {}), onboarded: true }, entries: data.entries };
-        save(); draft = null; render(); toast('Backup restored');
+        save(); wiz = null; render(); toast('Backup restored');
       } catch { toast('That file is not an Overtime backup'); }
     };
     reader.readAsText(file);
@@ -668,27 +736,25 @@
   // ---------- actions ----------
   const formOf = (el) => el.closest('form');
   const actions = {
-    'set-date'(el) {
-      const f = formOf(el).querySelector('[name=date]');
-      f.value = isoDate(Date.now() + Number(el.dataset.days) * 864e5); refreshLog(formOf(el));
-    },
     'set-field'(el) { formOf(el).querySelector(`[name="${el.dataset.target}"]`).value = el.dataset.value; refreshLog(formOf(el)); },
-    'set-now'(el) { formOf(el).querySelector('[name=finish]').value = hhmm(new Date()); refreshLog(formOf(el)); },
-    nudge(el) {
-      const f = formOf(el).querySelector('[name=finish]');
-      const [h, m] = (f.value || hhmm(new Date())).split(':').map(Number);
-      const t = ((h * 60 + m + Number(el.dataset.min)) % 1440 + 1440) % 1440;
-      f.value = `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; refreshLog(formOf(el));
+    'wiz-date'(el) { wiz.date = el.dataset.date; wizGo(2); },
+    'wiz-start'(el) { wiz.start = el.dataset.time; render(); },
+    'wiz-next'() {
+      if (wiz.step === 2) { if (!/^\d\d:\d\d$/.test(wiz.start || '')) { toast('Enter your rostered finish'); return; } wizGo(3); return; }
+      if (wiz.step === 4) { if (!wiz.details.trim()) { toast('Please specify the reason'); return; } wizGo(5); }
     },
-    'set-reason'(el) {
-      const form = formOf(el);
-      form.querySelector('[name=reason]').value = el.dataset.reason;
-      form.querySelectorAll('.reason').forEach((b) => b.classList.toggle('on', b === el));
-      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      refreshLog(form);
+    'wiz-finish'(el) { wizFinish(el.dataset.time); },
+    'wiz-finish-typed'() { if (!wiz.finish) { toast('Enter when you finished'); return; } wizFinish(wiz.finish); },
+    'wiz-reason'(el) {
+      wiz.reason = el.dataset.reason;
+      if (wiz.reason === '6') { render(); setTimeout(() => $('[data-wiz=details]')?.focus(), 50); }
+      else wizGo(5);
     },
-    'save-later'() { if (saveDraft()) { render(); toast('Saved — email it any time from Claims'); } },
-    'save-send'() { const e = saveDraft(); if (e) { render(); openSend([e]); } },
+    'wiz-unit'(el) { wiz.unit = el.dataset.unit; render(); },
+    'wiz-role'(el) { wiz.role = el.dataset.role; render(); },
+    'wiz-log'() { wizLog(); },
+    'wiz-back'() { wizGo(Math.max(1, wiz.step - 1)); },
+    'wiz-more'() { wiz = newWiz(); render(); window.scrollTo(0, 0); },
     'send-all'() { openSend(unsent()); },
     'share-claim'() { shareClaim(); },
     'preview-claim'() { if (pendingSend && pendingSend.file) download(pendingSend.file, pendingSend.meta.filename); },
@@ -697,6 +763,7 @@
       if (!pendingSend) return;
       const now = new Date().toISOString();
       pendingSend.entries.forEach((e) => { const x = state.entries.find((y) => y.id === e.id); if (x) x.sentAt = now; });
+      if (wiz && wiz.step === 6) wiz = null;
       save(); closeSheet(); render(); toast('Marked as sent');
     },
     edit(el) { const e = state.entries.find((x) => x.id === el.dataset.id); if (e) editSheet(e); },
@@ -748,19 +815,25 @@
     wipe() {
       if (!confirm('Erase ALL overtime entries and details from this phone?')) return;
       if (!confirm('Are you sure? This cannot be undone.')) return;
-      state = { settings: {}, entries: [] }; save(); welcomeStep = 0; draft = null; render(); toast('All data erased');
+      state = { settings: {}, entries: [] }; save(); welcomeStep = 0; wiz = null; render(); toast('All data erased');
     },
   };
 
   document.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-tab]');
-    if (tab) { if (!state.settings.onboarded) return; route = { tab: tab.dataset.tab }; render(); window.scrollTo(0, 0); return; }
+    if (tab) {
+      if (!state.settings.onboarded) return;
+      if (tab.dataset.tab === 'log' && wiz && wiz.step === 6) wiz = null;
+      route = { tab: tab.dataset.tab }; render(); window.scrollTo(0, 0); return;
+    }
     const el = e.target.closest('[data-act]');
     if (el && actions[el.dataset.act]) { e.preventDefault(); actions[el.dataset.act](el); }
   });
   document.addEventListener('input', (e) => {
     const key = e.target.dataset && e.target.dataset.setting;
     if (key) { state.settings[key] = e.target.value; save(); return; }
+    const wk = e.target.dataset && e.target.dataset.wiz;
+    if (wk && wiz) { wiz[wk] = e.target.value; return; }
     const form = e.target.closest('form');
     if (form && form.querySelector('#result')) refreshLog(form);
   });
@@ -768,14 +841,20 @@
     if (e.target.id === 'restore-file' && e.target.files[0]) restore(e.target.files[0]);
     const key = e.target.dataset && e.target.dataset.setting;
     if (key === 'level' && state.settings.onboarded) render();
+    // Calendar / clock pickers: a chosen value moves straight on to the next step.
+    const pk = e.target.dataset && e.target.dataset.wizPick;
+    if (pk && wiz && e.target.value) {
+      if (pk === 'date') { wiz.date = e.target.value; wizGo(2); }
+      else wizFinish(e.target.value);
+      return;
+    }
     const form = e.target.closest('form');
     if (form && form.querySelector('#result')) refreshLog(form);
   });
-  // Coming back to the app later: start a fresh entry with "left at" set to now.
+  // Coming back to the app: refresh the "Now / 15 min ago" times, or start fresh after a logged day.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden || !state.settings.onboarded || route.tab !== 'log' || $('#sheet').open) return;
-    const f = $('#log-form [name=finish]');
-    if (f && document.activeElement !== f && draft && draft.date === isoDate(new Date())) { f.value = hhmm(new Date()); refreshLog(); }
+    if (document.hidden || !state.settings.onboarded || route.tab !== 'log' || $('#sheet').open || !wiz) return;
+    if (wiz.step === 3 || wiz.step === 6) { if (wiz.step === 6) wiz = null; render(); }
   });
 
   // ---------- boot ----------

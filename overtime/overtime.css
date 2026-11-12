@@ -83,3 +83,59 @@
 .steps-list li { margin: 6px 0; }
 #view:has(#log-form) { padding-top: 12px; }
 .ot input[type="date"] { flex: 0 0 auto; width: auto; min-width: 140px; }
+
+/* ---------- step-by-step log ---------- */
+.wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin-bottom: 4px; }
+.wiz-head .link { padding: 6px 0; }
+.wiz-dots { display: flex; gap: 5px; }
+.wiz-dots i { width: 22px; height: 4px; border-radius: 2px; background: var(--line); }
+.wiz-dots i.on { background: var(--accent); }
+.wiz-sofar { font-size: 14px; color: var(--muted); font-weight: 600; margin: 2px 0 0; }
+.wiz-q { font-size: 26px; font-weight: 800; margin: 6px 0 16px; letter-spacing: -.01em; }
+
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.choice {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; min-height: 62px; padding: 12px 16px; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; font-size: 18px; color: var(--text);
+}
+.choice b { font-weight: 700; }
+.choice > span { color: var(--muted); font-size: 15px; font-weight: 600; }
+.choice:active { background: var(--accent-soft); }
+.choice.row-choice { min-height: 54px; }
+/* The real date/time input sits invisibly over the button, so tapping opens the phone's own picker. */
+.choice.picker { cursor: pointer; border-style: dashed; }
+.choice.picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; -webkit-appearance: none; appearance: none; border: 0; }
+
+.reason-choice { align-items: center; justify-content: flex-start; min-height: 0; padding: 9px 12px; }
+.reason-choice .num {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font-size: 16px;
+}
+.reason-choice > span { color: var(--muted); font-size: 13px; font-weight: 500; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reason-choice > span { flex: 1; min-width: 0; }
+.reason-choice > span b { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); font-size: 15px; margin-bottom: 1px; }
+.reason-choice em { flex: none; font-style: normal; font-weight: 700; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn-text); }
+.reason-choice em.ok { background: var(--accent-soft); color: var(--accent); }
+.reason-choice.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+
+.big-time, .big-input {
+  display: block; width: 100%; min-height: 64px; padding: 10px 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  -webkit-appearance: none; appearance: none; color: var(--text);
+}
+.big-time { font-size: 34px; font-weight: 800; text-align: center; }
+.big-input { font-size: 19px; margin-top: 12px; }
+.big-input:first-of-type { margin-top: 0; }
+.big-time:focus, .big-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.chips-row .chip { min-height: 42px; padding: 8px 16px; font-size: 16px; }
+.chip.on { background: var(--accent); color: var(--accent-text); }
+.seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--line); border-radius: 14px; padding: 4px; margin: 4px 0 18px; }
+.seg3 button { border: 0; background: none; min-height: 48px; border-radius: 11px; font-weight: 700; font-size: 16px; color: var(--muted); }
+.seg3 button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+
+.done { padding-top: 8px; }
+.done .tick { width: 64px; height: 64px; margin: 6px auto 4px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-text); font-size: 34px; font-weight: 800; }
+.reason-choice { padding: 8px 12px; gap: 10px; }
+.wiz-q { font-size: 24px; margin: 4px 0 12px; }

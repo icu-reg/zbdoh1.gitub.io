@@ -37,7 +37,7 @@ repository **Settings → Pages → Deploy from a branch**, choose the branch an
 
 A second app for logging unrostered overtime and emailing the Alfred Health *Unrostered Overtime Claim Form*.
 
-- **Set up once:** name, employee number (optional), department, level (Intern, HMO 2–3, Registrar 1–6+) and signature.
-- **Log in seconds:** date, rostered finish, time left, reason number (1–6 from the form) and optional details. A live total shows overtime hours and estimated pay: the first 2 hours of each day at 150%, the rest at 200%, using the AMA Victoria Doctors in Training Agreement 2022–2026 rates as at 1 March 2025 (hourly = weekly rate ÷ 38 for HMOs, ÷ 43 for registrars).
-- **Send now or later:** "Save & email" sends one day; "Save for later" collects days to send together from Claims. The real form (`overtime/form/unrostered-overtime-claim.pdf`, a blank copy) is filled in, 6 rows per page, and attached via the share sheet; the Medical Workforce address is copied for pasting into To.
+- **Set up once:** name, employee number (optional), level (Intern, HMO 2–3, Registrar 1–6+) and signature.
+- **Log step by step:** which day (today, yesterday, day before or pick a date) → rostered finish → actual finish (now, 15/30/45/60 min ago or pick a time) → reason (all six from the form) → unit and role. Expected pay is shown once the day is logged: the first 2 hours of each day at 150%, the rest at 200%, using the AMA Victoria Doctors in Training Agreement 2022–2026 rates as at 1 March 2025 (hourly = weekly rate ÷ 38 for interns/HMOs, ÷ 43 for registrars).
+- **Send now or later:** after logging, "Save & email" sends every unsent day; "Enter more overtime" logs another first. The real form (`overtime/form/unrostered-overtime-claim.pdf`, a blank copy) is filled in, 6 rows per page, and attached via the share sheet; the Medical Workforce address is copied for pasting into To. The email lists each shift as "12/11, Respiratory HMO, rostered finish: 5pm, actual finish: 5:45pm".
 - **Last 14 days:** total overtime, paid hours and estimated pay.
