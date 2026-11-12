@@ -30,3 +30,14 @@ repository **Settings → Pages → Deploy from a branch**, choose the branch an
 | `index.html`, `styles.css`, `app.js` | The app |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and Home Screen install |
 | `vendor/` | jsPDF and jsPDF-AutoTable (PDF) and qrcode-generator (share code), all MIT |
+
+---
+
+# Overtime Claims (`/overtime/`)
+
+A second app for logging unrostered overtime and emailing the Alfred Health *Unrostered Overtime Claim Form*.
+
+- **Set up once:** name, employee number (optional), department, level (Intern, HMO 2–3, Registrar 1–6+) and signature.
+- **Log in seconds:** date, rostered finish, time left, reason number (1–6 from the form) and optional details. A live total shows overtime hours and estimated pay: the first 2 hours of each day at 150%, the rest at 200%, using the AMA Victoria Doctors in Training Agreement 2022–2026 rates as at 1 March 2025 (hourly = weekly rate ÷ 38 for HMOs, ÷ 43 for registrars).
+- **Send now or later:** "Save & email" sends one day; "Save for later" collects days to send together from Claims. The real form (`overtime/form/unrostered-overtime-claim.pdf`, a blank copy) is filled in, 6 rows per page, and attached via the share sheet; the Medical Workforce address is copied for pasting into To.
+- **Last 14 days:** total overtime, paid hours and estimated pay.

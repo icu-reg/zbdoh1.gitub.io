@@ -1,0 +1,83 @@
+/* Overtime app: shares ../styles.css with On-Call Log, with its own colour so the two apps are easy to tell apart. */
+:root {
+  --bg: #f3f4f9;
+  --text: #151a2e;
+  --muted: #5f6680;
+  --line: #dde0ec;
+  --accent: #3a4fb3;
+  --accent-soft: #e5e8f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11141f;
+    --card: #1b1f2e;
+    --text: #e8eaf4;
+    --muted: #9aa0ba;
+    --line: #2c3246;
+    --accent: #8d9cf2;
+    --accent-text: #0e1330;
+    --accent-soft: #232a4a;
+  }
+}
+
+/* ---------- log form ---------- */
+.ot { display: flex; flex-direction: column; gap: 12px; }
+.ot [hidden] { display: none !important; }
+.ot-field > span { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 4px 4px; }
+.ot input, .ot select {
+  width: 100%; min-height: 46px; padding: 8px 11px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  font-size: 17px; -webkit-appearance: none; appearance: none;
+}
+.ot input:focus, .ot select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.ot input[type="time"] { font-size: 22px; font-weight: 700; text-align: center; }
+.ot-line { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.ot-line > input { flex: 1 1 0; min-width: 0; }
+.ot-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ot-times > * { min-width: 0; }
+.ot .scroller { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; padding: 2px 0; }
+.ot .scroller::-webkit-scrollbar { display: none; }
+.ot .chip { flex: none; min-height: 38px; padding: 6px 12px; }
+.ot .chip.on { background: var(--accent); color: var(--accent-text); }
+.ot-under { display: flex; gap: 6px; margin-top: 6px; }
+.ot-under .chip { flex: 1 1 0; padding: 6px 4px; }
+
+.result {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--accent-soft); color: var(--accent); border-radius: 14px; padding: 12px 14px;
+}
+.result .hrs { font-size: 24px; font-weight: 800; line-height: 1.1; }
+.result .split { font-size: 13px; font-weight: 600; opacity: .85; }
+.result .amt { font-size: 24px; font-weight: 800; text-align: right; line-height: 1.1; }
+.result .amt small { display: block; font-size: 12px; font-weight: 600; opacity: .85; }
+.result.none { background: var(--line); color: var(--muted); }
+
+.reasons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.reason {
+  min-height: 52px; padding: 6px 6px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); text-align: left; font-size: 13px; line-height: 1.2; font-weight: 600;
+}
+.reason b { display: block; font-size: 12px; color: var(--muted); }
+.reason.on { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+.reason.on b { color: inherit; opacity: .85; }
+.note { font-size: 13px; color: var(--warn-text); background: var(--warn-soft); border-radius: 10px; padding: 7px 11px; }
+
+.ot-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ot-actions .btn { margin: 0; min-height: 52px; }
+
+.pending {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 10px 14px;
+}
+.pending p { font-size: 14px; }
+.pending .btn { width: auto; min-height: 40px; padding: 8px 14px; margin: 0; }
+
+.totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.totals div { background: var(--accent-soft); border-radius: 12px; padding: 10px 4px; }
+.totals b { display: block; font-size: 20px; color: var(--accent); }
+.totals span { font-size: 12px; color: var(--muted); font-weight: 600; }
+
+.to-box { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 12px 0; }
+.to-box span { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.steps-list { margin: 0 0 14px; padding-left: 22px; }
+.steps-list li { margin: 6px 0; }

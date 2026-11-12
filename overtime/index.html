@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Overtime Claims</title>
+<meta name="description" content="Log unrostered overtime in seconds and email the claim form to Medical Workforce.">
+<meta property="og:title" content="Overtime Claims">
+<meta property="og:description" content="Log unrostered overtime in seconds and email the claim form. Open in Safari, then Share → Add to Home Screen.">
+<meta property="og:image" content="icons/icon-512.png">
+<meta name="theme-color" content="#3a4fb3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11141f" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Overtime">
+<meta name="format-detection" content="telephone=no">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="overtime.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="back" id="back" data-act="back" hidden aria-label="Back">‹ Back</button>
+  <h1 id="title">Overtime</h1>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<nav class="tabbar" aria-label="Sections">
+  <button data-tab="log" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 10.4 3.6 2.1-.9 1.6L11 13.4V6h2z"/></svg>
+    <span>Log</span>
+  </button>
+  <button data-tab="claims">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 1.5V8h4.5zM8 12v1.6h8V12zm0 3.6v1.6h8v-1.6z"/></svg>
+    <span>Claims</span>
+  </button>
+  <button data-tab="me">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.8-3.6-5-8-5z"/></svg>
+    <span>My details</span>
+  </button>
+</nav>
+
+<dialog id="sheet" aria-labelledby="sheet-title">
+  <form id="sheet-form" method="dialog" novalidate>
+    <div class="sheet-head">
+      <button type="button" class="link" data-act="sheet-cancel">Cancel</button>
+      <h2 id="sheet-title"></h2>
+      <button type="submit" class="link strong" id="sheet-save">Save</button>
+    </div>
+    <div class="sheet-body" id="sheet-body"></div>
+  </form>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="../vendor/pdf-lib.min.js"></script>
+<script src="../vendor/qrcode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
