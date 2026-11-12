@@ -641,6 +641,8 @@
     return out.save();
   }
 
+  // Gmail on iPhone squashes shared text into one paragraph and uses the file name as the subject,
+  // so the message is written as sentences that read well either way, and the file is named like a subject.
   function claimMeta(entries) {
     const st = state.settings;
     const sorted = [...entries].sort(byWhen);
@@ -648,17 +650,22 @@
     const range = first === last ? ddmm(first) : `${ddmm(first)}–${ddmm(last)}`;
     const t = sumOf(sorted);
     const who = (st.name || '').trim();
-    const subject = `Unrostered overtime claim – ${who || 'Doctor'}${st.employeeId ? ` (${st.employeeId})` : ''} – ${range}`;
+    const dm = (d) => { const x = parseDate(d); return `${x.getDate()}/${x.getMonth() + 1}`; };
     const dayName = (d) => parseDate(d).toLocaleDateString('en-AU', { weekday: 'short' });
-    const lines = sorted.map((e) => [
-      `• ${dayName(e.date)} ${ddmm(e.date)} – ${[unitOf(e), roleOf(e)].filter(Boolean).join(' ')}`,
-      `    Rostered finish: ${t12(e.start)}`,
-      `    Actual finish: ${t12(e.finish)}`,
-    ].join('\n'));
-    const shifts = `${sorted.length} shift${sorted.length === 1 ? '' : 's'}`;
-    const body = `Hello MWU,\n\nPlease see attached my unrostered overtime claim form for the following ${shifts}:\n\n${lines.join('\n\n')}\n\nThanks,\n${who}${st.employeeId ? `\nEmployee number: ${st.employeeId}` : ''}`;
-    const safe = who.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const filename = `Overtime-Claim${safe ? '_' + safe : ''}_${first}${first === last ? '' : '_to_' + last}.pdf`;
+    const shortDay = (d) => parseDate(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+    const dates = first === last ? shortDay(first) : `${shortDay(first)} to ${shortDay(last)}`;
+    const subject = `Unrostered overtime claim – ${who || 'Doctor'} – ${dates}`;
+    const shift = (e) => `${dayName(e.date)} ${dm(e.date)}${[unitOf(e), roleOf(e)].filter(Boolean).length ? ` (${[unitOf(e), roleOf(e)].filter(Boolean).join(' ')})` : ''}`
+      + `${sorted.length === 1 ? ':' : ','} rostered finish ${t12(e.start)}, actual finish ${t12(e.finish)}`;
+    let list;
+    if (sorted.length === 1) list = shift(sorted[0]);
+    else {
+      const items = sorted.map(shift);
+      list = `the following ${sorted.length} shifts: ${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`;
+    }
+    const body = `Hello MWU, please see attached my unrostered overtime claim form for ${list}.`
+      + `\n\nThanks, ${who || 'Doctor'}${st.employeeId ? ` (employee number ${st.employeeId})` : ''}.`;
+    const filename = `${subject.replace(/[\\/:*?"<>|]+/g, '-')}.pdf`;
     return { subject, body, filename, range, total: t };
   }
 
